@@ -256,7 +256,12 @@ export function setupAuth(app: Express) {
         }
         return res.json({
           message: "Registration successful",
-          user: { id: newUser.id, username: newUser.username },
+          user: {
+            id: newUser.id,
+            username: newUser.username,
+            ssid: newUser.ssid,
+            createdAt: newUser.createdAt
+          },
         });
       });
     } catch (error) {
@@ -281,7 +286,12 @@ export function setupAuth(app: Express) {
 
         return res.json({
           message: "Login successful",
-          user: { id: user.id, username: user.username },
+          user: {
+            id: user.id,
+            username: user.username,
+            ssid: user.ssid,
+            createdAt: user.createdAt
+          },
         });
       });
     })(req, res, next);
