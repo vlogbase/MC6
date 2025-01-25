@@ -81,6 +81,116 @@ export default function Home() {
     );
   }
 
+  const openApiSpec = {
+    openapi: "3.1.0",
+    info: {
+      title: "Link Rewriting API",
+      version: "1.0.0",
+      description: "API for rewriting affiliate links with custom tracking"
+    },
+    servers: [
+      {
+        url: window.location.origin
+      }
+    ],
+    paths: {
+      "/api/rewrite": {
+        post: {
+          operationId: "rewriteUrl",
+          summary: "Rewrite a URL with affiliate information",
+          security: [{ ApiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/RewriteUrlRequest"
+                }
+              }
+            }
+          },
+          responses: {
+            "200": {
+              description: "Successfully rewritten URL",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/RewriteUrlResponse"
+                  }
+                }
+              }
+            },
+            "400": {
+              description: "Invalid input",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse"
+                  }
+                }
+              }
+            },
+            "401": {
+              description: "Missing or invalid API key",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    components: {
+      schemas: {
+        RewriteUrlRequest: {
+          type: "object",
+          required: ["url", "source"],
+          properties: {
+            url: {
+              type: "string",
+              description: "The URL to rewrite"
+            },
+            source: {
+              type: "string",
+              description: "Source identifier for tracking"
+            }
+          }
+        },
+        RewriteUrlResponse: {
+          type: "object",
+          required: ["rewrittenUrl"],
+          properties: {
+            rewrittenUrl: {
+              type: "string",
+              description: "The rewritten URL with SSID and source parameters"
+            }
+          }
+        },
+        ErrorResponse: {
+          type: "object",
+          required: ["error"],
+          properties: {
+            error: {
+              type: "string",
+              description: "Error message"
+            }
+          }
+        }
+      },
+      securitySchemes: {
+        ApiKeyAuth: {
+          type: "apiKey",
+          in: "header",
+          name: "X-API-KEY"
+        }
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -136,11 +246,11 @@ export default function Home() {
             </div>
           </TabsContent>
 
-          <TabsContent value="integration">
+          <TabsContent value="integration" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>API Integration</CardTitle>
-                <CardDescription>Authenticate your API requests using a custom header</CardDescription>
+                <CardTitle>Authentication</CardTitle>
+                <CardDescription>Use this API key to authenticate your requests</CardDescription>
               </CardHeader>
               <CardContent>
                 <div>
@@ -158,6 +268,28 @@ export default function Home() {
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>OpenAPI Specification</CardTitle>
+                <CardDescription>Use this specification to integrate with your applications</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="relative">
+                  <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
+                    {JSON.stringify(openApiSpec, null, 2)}
+                  </pre>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="absolute top-2 right-2"
+                    onClick={() => handleCopy(JSON.stringify(openApiSpec, null, 2), "OpenAPI spec copied!")}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
                 </div>
               </CardContent>
             </Card>
