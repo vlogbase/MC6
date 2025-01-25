@@ -82,7 +82,11 @@ export function registerRoutes(app: Express): Server {
     }
 
     // Find user by API key
-    const [user] = await db.select().from(users).where(eq(users.apiKey, apiKey as string)).limit(1);
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.apiKey, apiKey as string))
+      .limit(1);
     if (!user) {
       return res.status(401).json({ error: "Invalid API key" });
     }
@@ -93,7 +97,6 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
-      // Get base tracking link
       const baseLink = await getRewrittenUrl(url, user.id, source);
 
       // Append ssid and source parameters
@@ -118,7 +121,11 @@ export function registerRoutes(app: Express): Server {
     }
 
     // Find user by API key
-    const [user] = await db.select().from(users).where(eq(users.apiKey, apiKey as string)).limit(1);
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.apiKey, apiKey as string))
+      .limit(1);
     if (!user) {
       return res.status(401).json({ error: "Invalid API key" });
     }
@@ -135,7 +142,7 @@ export function registerRoutes(app: Express): Server {
         time_start: timeStart,
         time_end: timeEnd,
         time_type: "checked",
-        ssid: user.ssid, // Filter stats by user's ssid
+        ssid: user.ssid,
       });
       res.json(data);
     } catch (err: any) {
@@ -150,14 +157,13 @@ export function registerRoutes(app: Express): Server {
   // Protected dashboard endpoints 
   app.get("/api/links", authenticateRequest, async (req, res) => {
     try {
-      const userId = req.user?.id || req.oauthToken?.userId;
-      if (!userId) {
-        return res.status(401).json({ error: "No user found in session or token" });
+      if (!req.user?.id) {
+        return res.status(401).json({ error: "No user found in session" });
       }
       const userLinks = await db
         .select()
         .from(links)
-        .where(eq(links.userId, userId))
+        .where(eq(links.userId, req.user.id))
         .orderBy(links.createdAt);
       res.json(userLinks);
     } catch (error) {
