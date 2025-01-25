@@ -1,0 +1,108 @@
+Replit Prompt Instructions
+Use these instructions as your single prompt in Replit (or follow them manually):
+
+1. Store an API Key per Creator/User
+Add an apiKey column to your users table (or create a separate table).
+
+For simplicity, you can store each creator’s API key in the users table, e.g.:
+sql
+Copy
+Edit
+ALTER TABLE users ADD COLUMN api_key text;
+Or create a dedicated api_keys table referencing userId; either way is fine.
+Generate an API key whenever a user is created or upon request.
+
+For example, in your register route, after inserting a user, you could do:
+ts
+Copy
+Edit
+import { randomBytes } from "crypto";
+// ... const apiKey = randomBytes(20).toString("hex"); // or nanoid(40) // Then store in DB await db.update(users).set({ apiKey }).where(eq(users.id, newUser.id)); ```
+
+That’s the user’s unique key. Provide it in the JSON response so they can see it:
+json
+Copy
+Edit
+{
+  "message": "Registration successful",
+  "user": { "id": 123, "username": "Alice", "apiKey": "dcb8b1..." }
+}
+Optionally: create a special “rotate key” or “revoke key” endpoint.
+For example, POST /api/me/api-key/rotate, which re-generates and stores a new random API key for the user.
+This is more advanced, but often needed so a user can manage or reset their key.
+2. Remove/Bypass “Bearer token” or Session Requirement for GPT Routes
+We only want to authenticate using the user’s apiKey. So we do not require each end-user to log in.
+
+Keep your existing local login code for your own user dashboard if you want—but do not call authenticateRequest() or token checks on GPT routes like /api/rewrite or /api/stats.
+
+Instead, we do an API key check. For example, in server/routes.ts:
+
+ts
+Copy
+Edit
+// Example route for rewriting:
+app.post("/api/rewrite", async (req, res) => {
+  // Expect an X-API-KEY header
+  const providedKey = req.headers["x-api-key"];
+  if (!providedKey) {
+    return res.status(401).json({ error: "Missing X-API-KEY" });
+  }
+
+  // 1) Look up the user by that API key
+  const [user] = await db.select().from(users).where(eq(users.apiKey, providedKey)).limit(1);
+  if (!user) {
+    return res.status(401).json({ error: "Invalid API key" });
+  }
+
+  // 2) Now you have a known 'creator' user
+  // proceed with rewriting logic, using user.id or user.ssid
+  // ...
+});
+Do the same for /api/stats/:type: check for X-API-KEY, find the user by apiKey, then proceed. If not found, respond 401.
+
+3. Fix the Strackr Rewrite Logic (Cache Base Link; Append SSID/Source at the End)
+Store the base affiliate link that Strackr returns, without appending ssid or source in the DB or memory cache.
+
+Then, in the final step, add ssid and source to the returned link. For example:
+
+ts
+Copy
+Edit
+// (Inside /api/rewrite route after verifying the user's API key)
+const { url, source } = req.body;
+// e.g. user.id is the “creator’s” DB id
+const userSsid = user.ssid; // or fetch from `user.ssid`
+
+const baseLink = await getOrFetchBaseLink(url, user.id);
+// Then do:
+const finalUrl = new URL(baseLink);
+finalUrl.searchParams.set("ssid", userSsid);
+finalUrl.searchParams.set("source", source);
+
+return res.json({ rewrittenUrl: finalUrl.toString() });
+Where your getOrFetchBaseLink function:
+
+Checks a memory or DB cache keyed by (user.id, originalUrl).
+If not found, calls Strackr for the base link, saves it, returns it.
+No ssid/source appended at that stage.
+4. Each Creator Embeds Their Own API Key in GPT
+Now each “creator” has a unique key. They embed that key into the chatbot’s config or “system prompt” so GPT always calls:
+http
+Copy
+Edit
+POST /api/rewrite
+X-API-KEY: <their-unique-key>
+Content-Type: application/json
+
+{ "url": "https://example.com", "source": "myBot" }
+The final end-user chatting with that bot does not log in. They only talk to GPT, which uses the key behind the scenes.
+5. Test Everything
+Register or create a user; ensure you get an apiKey.
+Call POST /api/rewrite with X-API-KEY: <thatKey>. Confirm it returns rewrittenUrl.
+Check repeated calls use the same cached base link from Strackr, but can vary the source or ssid.
+Optionally test local user sessions for your own dashboard—these do not affect GPT calls.
+That’s it! By following these instructions, you have:
+
+Multiple creators each with a unique API key.
+GPT routes require an API key to identify which creator is requesting.
+End-users of each chatbot do not have to log in individually.
