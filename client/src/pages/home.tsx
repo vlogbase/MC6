@@ -174,30 +174,20 @@ export default function Home() {
     }
   };
 
-  const gptPrompt = `To use this API for rewriting URLs, follow these authentication steps:
+  const gptPrompt = `To use this API for rewriting URLs, follow these steps:
 
-1. First, obtain an access token by making a POST request to \`${window.location.origin}/api/auth\` with:
+1. Get an access token by making a POST request to \`${window.location.origin}/api/auth\`:
    - Content-Type: application/json
    - Body: {
        "client_id": "${oauthCredentials?.client_id || ''}",
        "client_secret": "${oauthCredentials?.client_secret || ''}"
      }
 
-2. From the response, extract the access_token.
+2. Use the returned access_token in your requests.
 
-3. For all subsequent requests to rewrite URLs, include:
-   - Authorization: Bearer <your_access_token>
-   - Content-Type: application/json
-
-4. To rewrite a URL, make a POST request to \`${window.location.origin}/api/rewrite\` with:
-   - Body: {
-       "url": "original-url-here",
-       "source": "source-identifier"
-     }
-
-Example flow:
+Example:
 \`\`\`javascript
-// Step 1: Get access token
+// Get access token
 const authResponse = await fetch("${window.location.origin}/api/auth", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -208,7 +198,7 @@ const authResponse = await fetch("${window.location.origin}/api/auth", {
 });
 const { access_token } = await authResponse.json();
 
-// Step 2: Rewrite URL using the token
+// Use the token to rewrite URLs
 const rewriteResponse = await fetch("${window.location.origin}/api/rewrite", {
   method: "POST",
   headers: {
@@ -223,9 +213,8 @@ const rewriteResponse = await fetch("${window.location.origin}/api/rewrite", {
 const { rewrittenUrl } = await rewriteResponse.json();
 \`\`\`
 
-After obtaining the rewritten URL, you can use it in your response.
-
-Important: The access token expires after 1 hour. If you receive a 401 error, obtain a new token using Step 1.`;
+The access token expires after 1 hour. If you receive a 401 error, simply request a new token using the same process.
+No user authentication is required - the API handles everything automatically.`;
 
   if (statsError) {
     toast({
