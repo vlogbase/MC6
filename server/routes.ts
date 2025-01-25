@@ -4,79 +4,56 @@ import axios from "axios";
 import { db } from "@db";
 import { links } from "@db/schema";
 import { eq } from "drizzle-orm";
-import { setupAuth } from "./auth";
-import { authenticateRequest } from "./auth";
+import { setupAuth, authenticateRequest } from "./auth";
 
-/**
- * ----------------------------------------------------------------------------
- * SIMPLE IN-MEMORY CACHE for Link Rewrites
- * ----------------------------------------------------------------------------
- * We store (userId, originalUrl, source) => { rewrittenUrl, timestamp }
- * to avoid repeatedly calling Strackr for the same link.
- */
+// In-memory cache for rewriting
 const urlCache = new Map<
-  string, // e.g. `${userId}:${originalUrl}:${source}`
+  string, // `${userId}:${originalUrl}:${source}`
   {
     rewrittenUrl: string;
     timestamp: number;
   }
 >();
-const CACHE_TTL = 3600000; // 1 hour in milliseconds
+const CACHE_TTL = 3600000; // 1 hour in ms
 
-/**
- * This function calls Strackr's /tools/linkbuilder only when NOT cached.
- * (And we store new links to the DB under a "system" user or real user.)
- */
 async function getRewrittenUrl(
   originalUrl: string,
   userId: number,
   source: string
 ): Promise<string> {
-  // Make a unique cache key
   const cacheKey = `${userId}:${originalUrl}:${source}`;
-
-  // 1. Check our in-memory cache first
   const cached = urlCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.rewrittenUrl;
   }
 
-  // 2. Otherwise, call Strackr
+  // Not in cache => call Strackr
   try {
-    const response = await axios.get("https://api.strackr.com/v3/tools/linkbuilder", {
+    const resp = await axios.get("https://api.strackr.com/v3/tools/linkbuilder", {
       params: {
         api_id: process.env.STRACKR_API_ID,
         api_key: process.env.STRACKR_API_KEY,
         url: originalUrl,
       },
     });
-
-    // 3. Pick the first tracking link from Strackr’s response
-    const data = response.data;
+    const data = resp.data;
     let trackingLink: string | undefined;
     const [first] = data.results || [];
-    if (first?.advertisers?.length > 0) {
+    if (first?.advertisers?.length) {
       const adv = first.advertisers[0];
-      if (adv.connections?.length > 0) {
+      if (adv.connections?.length) {
         const conn = adv.connections[0];
-        if (conn.links?.length > 0) {
+        if (conn.links?.length) {
           trackingLink = conn.links[0].trackinglink;
         }
       }
     }
+    if (!trackingLink) throw new Error("No tracking link found from Strackr");
 
-    if (!trackingLink) {
-      throw new Error("No tracking link found from Strackr");
-    }
+    // Store in in-memory cache
+    urlCache.set(cacheKey, { rewrittenUrl: trackingLink, timestamp: Date.now() });
 
-    // 4. Cache it in memory
-    urlCache.set(cacheKey, {
-      rewrittenUrl: trackingLink,
-      timestamp: Date.now(),
-    });
-
-    // 5. Also store in the DB (optional). If you want the user-based approach,
-    //    pass a real userId. If you want "system" storage for GPT, pick userId=1.
+    // Also store in DB if you want them visible to user #1 or something
     await db.insert(links).values({
       userId,
       originalUrl,
@@ -91,122 +68,101 @@ async function getRewrittenUrl(
   }
 }
 
-/**
- * ----------------------------------------------------------------------------
- * GET STRACKR STATS (optional, if you want to fetch stats similarly)
- * ----------------------------------------------------------------------------
- */
-async function fetchStrackrStats(
-  endpoint: string,
-  params: Record<string, string>
-): Promise<any> {
-  try {
-    const response = await axios.get(`https://api.strackr.com/v3/${endpoint}`, {
-      params: {
-        api_id: process.env.STRACKR_API_ID,
-        api_key: process.env.STRACKR_API_KEY,
-        ...params,
-      },
-    });
-    return response.data;
-  } catch (error: any) {
-    console.error(`Strackr ${endpoint} error:`, error?.message || error);
-    throw error;
-  }
+async function fetchStrackrStats(endpoint: string, params: Record<string, string>) {
+  const resp = await axios.get(`https://api.strackr.com/v3/${endpoint}`, {
+    params: {
+      api_id: process.env.STRACKR_API_ID,
+      api_key: process.env.STRACKR_API_KEY,
+      ...params,
+    },
+  });
+  return resp.data;
 }
 
 export function registerRoutes(app: Express): Server {
-  // Sets up session-based auth (local strategy, OAuth). See auth.ts below
+  // Set up local+token auth
   setupAuth(app);
 
   /**
-   * ---------------------------------------------------------
-   * /api/rewrite - NO LOGIN REQUIRED
-   * ---------------------------------------------------------
-   * GPT or any system can POST { url, source } here. We do:
-   *  1. Check local cache
-   *  2. If missing, call Strackr
-   *  3. Store in DB under userId=1 (or any ID you want)
+   * GPT endpoints => require Bearer token, but NOT local user session
+   * We'll do a minimal check:
+   *    if (req.oauthToken) => allow
+   *    else => 401
+   *
+   * If you want them fully open, remove the check.
    */
-  app.post("/api/rewrite", async (req, res) => {
-    try {
-      const { url, source } = req.body;
-      if (!url || !source) {
-        return res
-          .status(400)
-          .json({ error: "Both 'url' and 'source' are required." });
-      }
-      // If you want them stored under a "system" user, pick userId=1:
-      const systemUserId = 1;
-      const rewrittenUrl = await getRewrittenUrl(url, systemUserId, source);
-      return res.json({ rewrittenUrl });
-    } catch (error: any) {
-      console.error("Rewrite error:", error);
-      return res.status(500).json({
-        error: "Failed to rewrite link",
-        message: error?.message || String(error),
-      });
+  app.post("/api/rewrite", (req, res) => {
+    // Check that there's a valid token
+    if (!req.oauthToken) {
+      return res.status(401).json({ error: "Missing or invalid Bearer token" });
     }
+
+    const { url, source } = req.body;
+    if (!url || !source) {
+      return res.status(400).json({ error: "url and source are required" });
+    }
+
+    // e.g. store them under userId=1 in DB, or userId= req.oauthToken.userId
+    // We'll use oauthToken.userId so if you minted that token for user=1, it’s 1 anyway
+    const userId = req.oauthToken.userId || 1;
+
+    getRewrittenUrl(url, userId, source)
+      .then((rewrittenUrl) => res.json({ rewrittenUrl }))
+      .catch((err: any) => {
+        console.error("Rewrite error:", err);
+        res.status(500).json({
+          error: "Failed to rewrite link",
+          message: err?.message || String(err),
+        });
+      });
+  });
+
+  app.get("/api/stats/:type", (req, res) => {
+    // Also require token or open it if you want
+    if (!req.oauthToken) {
+      return res.status(401).json({ error: "Missing or invalid Bearer token" });
+    }
+    const { type } = req.params;
+    const { timeStart, timeEnd } = req.query as { [key: string]: string };
+    if (!timeStart || !timeEnd) {
+      return res.status(400).json({ error: "timeStart and timeEnd are required" });
+    }
+
+    const endpoint = `reports/${type}`;
+    fetchStrackrStats(endpoint, {
+      time_start: timeStart,
+      time_end: timeEnd,
+      time_type: "checked",
+    })
+      .then((data) => res.json(data))
+      .catch((err) => {
+        console.error(`Stats error for ${type}:`, err);
+        res.status(500).json({
+          error: `Failed to fetch ${type} stats`,
+          message: err?.message || String(err),
+        });
+      });
   });
 
   /**
-   * ---------------------------------------------------------
-   * /api/stats/:type - NO LOGIN REQUIRED
-   * ---------------------------------------------------------
-   * For GPT usage, your AI can call /api/stats/clicks or /api/stats/transactions
-   * or whatever. We skip session-check so it never asks for login.
-   * Query params: ?timeStart=YYYY-MM-DD&timeEnd=YYYY-MM-DD
-   */
-  app.get("/api/stats/:type", async (req, res) => {
-    try {
-      const { type } = req.params;
-      const { timeStart, timeEnd } = req.query;
-      if (!timeStart || !timeEnd) {
-        return res
-          .status(400)
-          .json({ error: "Must provide 'timeStart' and 'timeEnd' query params" });
-      }
-      // e.g. endpoint = 'reports/clicks' or 'reports/transactions'
-      // If your "type" is something else, adjust this logic as needed
-      const endpoint = `reports/${type}`;
-
-      const data = await fetchStrackrStats(endpoint, {
-        time_start: String(timeStart),
-        time_end: String(timeEnd),
-        time_type: "checked",
-      });
-      return res.json(data);
-    } catch (error: any) {
-      console.error(`Stats error for ${req.params.type}:`, error);
-      return res.status(500).json({
-        error: `Failed to fetch ${req.params.type} stats`,
-        message: error?.message || String(error),
-      });
-    }
-  });
-
-  /**
-   * ---------------------------------------------------------
-   * PROTECTED ROUTES (REMAINING)
-   * ---------------------------------------------------------
-   * e.g. retrieving a user’s own links. We'll keep these behind
-   * authenticateRequest so your normal user dashboard requires login.
+   * Protected endpoints for your local users:
+   * e.g. /api/links => must have user session or valid token
    */
   app.get("/api/links", authenticateRequest, async (req, res) => {
     try {
       const userId = req.user?.id || req.oauthToken?.userId;
       if (!userId) {
-        return res.status(401).json({ error: "Not authenticated" });
+        return res.status(401).json({ error: "No user found in session or token" });
       }
       const userLinks = await db
         .select()
         .from(links)
         .where(eq(links.userId, userId))
         .orderBy(links.createdAt);
-      return res.json(userLinks);
+      res.json(userLinks);
     } catch (error) {
       console.error("Error fetching links:", error);
-      return res.status(500).json({ error: "Failed to fetch links" });
+      res.status(500).json({ error: "Failed to fetch links" });
     }
   });
 
