@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { LogOut, Copy, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 interface OAuthCredentials {
   client_id: string;
@@ -25,6 +26,26 @@ export default function Home() {
   const { data: oauthCredentials } = useQuery<OAuthCredentials>({
     queryKey: ["/api/oauth-credentials"],
   });
+
+  // Memoize stats calculations to prevent re-renders
+  const { transactionStats, revenueStats, clickStats } = useMemo(() => {
+    return {
+      transactionStats: {
+        total: transactions?.length || 0,
+        totalAmount: transactions?.reduce((sum, t) => sum + parseFloat(t.price), 0) || 0,
+        pendingCount: transactions?.filter(t => t.status_id === 'pending').length || 0
+      },
+      revenueStats: {
+        total: revenues?.reduce((sum, r) => sum + parseFloat(r.revenue), 0) || 0,
+        transactionCount: revenues?.reduce((sum, r) => sum + (r.transactions || 0), 0) || 0,
+        currency: revenues?.[0]?.currency || 'USD'
+      },
+      clickStats: {
+        total: clicks?.reduce((sum, c) => sum + (c.clicks || 0), 0) || 0,
+        channels: clicks ? new Set(clicks.map(c => c.channel_name)).size : 0
+      }
+    };
+  }, [transactions, revenues, clicks]);
 
   async function handleLogout() {
     try {
@@ -52,6 +73,14 @@ export default function Home() {
         description: "Failed to copy to clipboard",
       });
     }
+  }
+
+  if (statsError) {
+    toast({
+      variant: "destructive",
+      title: "Error loading stats",
+      description: statsError.message
+    });
   }
 
   const openApiSpec = {
@@ -226,32 +255,6 @@ const { rewrittenUrl } = await rewriteResponse.json();
 After obtaining the rewritten URL, you can use it in your response.
 
 Important: The access token expires after 1 hour. If you receive a 401 error, obtain a new token using Step 1.`;
-
-  if (statsError) {
-    toast({
-      variant: "destructive",
-      title: "Error loading stats",
-      description: statsError.message
-    });
-  }
-
-  // Calculate summary statistics
-  const transactionStats = {
-    total: transactions?.length || 0,
-    totalAmount: transactions?.reduce((sum, t) => sum + parseFloat(t.price), 0) || 0,
-    pendingCount: transactions?.filter(t => t.status_id === 'pending').length || 0
-  };
-
-  const revenueStats = {
-    total: revenues?.reduce((sum, r) => sum + parseFloat(r.revenue), 0) || 0,
-    transactionCount: revenues?.reduce((sum, r) => sum + (r.transactions || 0), 0) || 0,
-    currency: revenues?.[0]?.currency || 'USD'
-  };
-
-  const clickStats = {
-    total: clicks?.reduce((sum, c) => sum + (c.clicks || 0), 0) || 0,
-    channels: [...new Set(clicks?.map(c => c.channel_name) || [])].length
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
