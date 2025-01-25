@@ -59,7 +59,7 @@ export default function Home() {
     info: {
       title: "Link Rewriting API",
       version: "1.0.0",
-      description: `API for rewriting links with SSID: ${user?.ssid ?? ''}`
+      description: `API for rewriting links for user: ${user?.username ?? ''}`
     },
     servers: [
       {
@@ -259,7 +259,7 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold">Welcome, {user?.username || "Guest"}</h1>
-            <p className="text-gray-600">Your SSID: {user?.ssid || "Not available"}</p>
+            <p className="text-gray-600">User ID: {user?.id || "Not available"}</p>
           </div>
           <Button onClick={handleLogout} variant="ghost">
             <LogOut className="mr-2 h-4 w-4" />

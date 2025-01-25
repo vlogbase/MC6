@@ -250,7 +250,6 @@ export function setupAuth(app: Express) {
           user: {
             id: newUser.id,
             username: newUser.username,
-            ssid: newUser.ssid,
             createdAt: newUser.createdAt,
           },
         });
@@ -273,7 +272,6 @@ export function setupAuth(app: Express) {
           user: {
             id: user.id,
             username: user.username,
-            ssid: user.ssid,
             createdAt: user.createdAt,
           },
         });
@@ -307,7 +305,6 @@ export function setupAuth(app: Express) {
     return res.json({
       id: req.user!.id,
       username: req.user!.username,
-      ssid: req.user!.ssid,
       createdAt: req.user!.createdAt,
     });
   });
