@@ -5,7 +5,7 @@ import passport from "passport";
 import { IVerifyOptions, Strategy as LocalStrategy } from "passport-local";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
-import { users } from "@db/schema";
+import { users, insertUserSchema, type SelectUser } from "@db/schema";
 import { db } from "@db";
 import { eq } from "drizzle-orm";
 
@@ -82,7 +82,7 @@ export function setupAuth(app: Express) {
     saveUninitialized: false,
     cookie: {},
     store: new MemoryStore({
-      checkPeriod: 86400000,
+      checkPeriod: 86400000, // prune expired entries every 24h
     }),
   };
 
@@ -97,6 +97,46 @@ export function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
   app.use(verifyOAuthToken);
+
+  passport.use(
+    new LocalStrategy(async (username, password, done) => {
+      try {
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.username, username))
+          .limit(1);
+
+        if (!user) {
+          return done(null, false, { message: "Incorrect username." });
+        }
+        const isMatch = await crypto.compare(password, user.password);
+        if (!isMatch) {
+          return done(null, false, { message: "Incorrect password." });
+        }
+        return done(null, user);
+      } catch (err) {
+        return done(err);
+      }
+    })
+  );
+
+  passport.serializeUser((user, done) => {
+    done(null, user.id);
+  });
+
+  passport.deserializeUser(async (id: number, done) => {
+    try {
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      done(null, user);
+    } catch (err) {
+      done(err);
+    }
+  });
 
   // OAuth endpoints
   app.post("/api/auth", async (req, res) => {
@@ -165,47 +205,6 @@ export function setupAuth(app: Express) {
     });
   });
 
-  passport.use(
-    new LocalStrategy(async (username, password, done) => {
-      try {
-        const [user] = await db
-          .select()
-          .from(users)
-          .where(eq(users.username, username))
-          .limit(1);
-
-        if (!user) {
-          return done(null, false, { message: "Incorrect username." });
-        }
-        const isMatch = await crypto.compare(password, user.password);
-        if (!isMatch) {
-          return done(null, false, { message: "Incorrect password." });
-        }
-        return done(null, user);
-      } catch (err) {
-        return done(err);
-      }
-    })
-  );
-
-  passport.serializeUser((user, done) => {
-    done(null, user.id);
-  });
-
-  passport.deserializeUser(async (id: number, done) => {
-    try {
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, id))
-        .limit(1);
-      done(null, user);
-    } catch (err) {
-      done(err);
-    }
-  });
-
-
   app.post("/api/register", async (req, res, next) => {
     try {
       const result = insertUserSchema.safeParse(req.body);
@@ -217,6 +216,7 @@ export function setupAuth(app: Express) {
 
       const { username, password } = result.data;
 
+      // Check if user already exists
       const [existingUser] = await db
         .select()
         .from(users)
@@ -227,8 +227,10 @@ export function setupAuth(app: Express) {
         return res.status(400).send("Username already exists");
       }
 
+      // Hash the password
       const hashedPassword = await crypto.hash(password);
 
+      // Create the new user with SSID
       const [newUser] = await db
         .insert(users)
         .values({
@@ -237,13 +239,14 @@ export function setupAuth(app: Express) {
         })
         .returning();
 
+      // Log the user in after registration
       req.login(newUser, (err) => {
         if (err) {
           return next(err);
         }
         return res.json({
           message: "Registration successful",
-          user: newUser,
+          user: { id: newUser.id, username: newUser.username },
         });
       });
     } catch (error) {
@@ -252,13 +255,6 @@ export function setupAuth(app: Express) {
   });
 
   app.post("/api/login", (req, res, next) => {
-    const result = insertUserSchema.safeParse(req.body);
-    if (!result.success) {
-      return res
-        .status(400)
-        .send("Invalid input: " + result.error.issues.map(i => i.message).join(", "));
-    }
-
     passport.authenticate("local", (err: any, user: Express.User, info: IVerifyOptions) => {
       if (err) {
         return next(err);
@@ -275,7 +271,7 @@ export function setupAuth(app: Express) {
 
         return res.json({
           message: "Login successful",
-          user: user,
+          user: { id: user.id, username: user.username },
         });
       });
     })(req, res, next);
@@ -293,7 +289,7 @@ export function setupAuth(app: Express) {
 
   app.get("/api/user", authenticateRequest, (req, res) => {
     // Use oauthToken or req.user depending on authentication method
-    res.json(req.oauthToken ? { id: req.oauthToken.userId} : req.user);
+    res.json(req.oauthToken ? { id: req.oauthToken.userId } : req.user);
   });
 }
 
