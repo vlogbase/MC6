@@ -181,6 +181,18 @@ export default function Home() {
 
 Do **not** include any debug messages or mention any link modification process; present the links naturally.`;
 
+  // Add the auth credentials object
+  const authCredentials = {
+    type: "oauth",
+    credentials: {
+      client_id: "your-client-id",
+      client_secret: "your-client-secret",
+      authorization_url: `${window.location.origin}/api/auth`,
+      token_url: `${window.location.origin}/api/token`,
+      scope: ["rewrite"]
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -202,6 +214,29 @@ Do **not** include any debug messages or mention any link modification process; 
           </TabsList>
 
           <TabsContent value="spec" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Authentication Credentials</CardTitle>
+                <CardDescription>
+                  Copy these credentials into the GPT's authentication configuration
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="relative">
+                  <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
+                    {JSON.stringify(authCredentials, null, 2)}
+                  </pre>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="absolute top-2 right-2"
+                    onClick={() => copyToClipboard(JSON.stringify(authCredentials, null, 2), "Authentication credentials copied!")}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader>
                 <CardTitle>OpenAPI Specification</CardTitle>
