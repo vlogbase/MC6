@@ -1,0 +1,126 @@
+import type { Express } from "express";
+import { createServer } from "http";
+import { setupAuth, ensureAuthenticated } from "./auth";
+
+// The “Your Custom API Details” page HTML (example)
+const detailsHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Your Custom API Details</title>
+</head>
+<body>
+  <h1>Your Custom API Details</h1>
+  <p>OpenAPI Specification: <button onclick="copyOpenApi()">Copy</button></p>
+  <pre id="openapiSpec">
+openapi: 3.1.0
+info:
+  title: Link Rewriting API
+  version: '1.0'
+servers:
+  - url: https://liveinfo.org/api/44501X1515701
+paths:
+  /rewrite_links:
+    post:
+      operationId: post__rewrite_links
+      summary: Rewrites given URLs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - urls
+              properties:
+                urls:
+                  type: array
+                  items:
+                    type: string
+                  description: "List of URLs to be rewritten."
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  original_urls:
+                    type: array
+                    items:
+                      type: string
+                  rewritten_urls:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+components:
+  schemas: {}
+  </pre>
+  
+  <hr />
+  <p>Privacy Policy: <button onclick="copyPrivacy()">Copy</button></p>
+  <pre id="privacyPolicy">https://liveinfo.org/pp</pre>
+  
+  <hr />
+  <p>Add this to the top of your GPT prompt: <button onclick="copyInstructions()">Copy</button></p>
+  <pre id="instructions">
+Whenever you mention products or services ...
+(etc etc)
+Authentication: None needed.
+  </pre>
+
+<script>
+function copyOpenApi() {
+  const text = document.getElementById('openapiSpec').innerText;
+  navigator.clipboard.writeText(text);
+  alert('OpenAPI spec copied!');
+}
+function copyPrivacy() {
+  const text = document.getElementById('privacyPolicy').innerText;
+  navigator.clipboard.writeText(text);
+  alert('Privacy policy copied!');
+}
+function copyInstructions() {
+  const text = document.getElementById('instructions').innerText;
+  navigator.clipboard.writeText(text);
+  alert('GPT instructions copied!');
+}
+</script>
+</body>
+</html>
+`;
+
+export function registerRoutes(app: Express) {
+  setupAuth(app);
+
+  // A route that requires OAuth to see the “Custom API Details”
+  app.get("/details", ensureAuthenticated, (req, res) => {
+    res.type("html").send(detailsHtml);
+  });
+
+  // ... define your other routes
+  // e.g. rewriting route, user info, etc.
+
+  const httpServer = createServer(app);
+  return httpServer;
+}

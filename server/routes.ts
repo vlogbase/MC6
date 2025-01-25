@@ -1,8 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { setupAuth } from "./auth";
+import { setupAuth, ensureAuthenticated } from "./auth";
 import { db } from "@db";
-import { links, insertLinkSchema } from "@db/schema";
+import { links } from "@db/schema";
 import { eq, and } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 
@@ -25,6 +25,114 @@ function getCachedLink(cacheKey: string) {
   return null;
 }
 
+// The "Your Custom API Details" page HTML
+const detailsHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Your Custom API Details</title>
+</head>
+<body>
+  <h1>Your Custom API Details</h1>
+  <p>OpenAPI Specification: <button onclick="copyOpenApi()">Copy</button></p>
+  <pre id="openapiSpec">
+openapi: 3.1.0
+info:
+  title: Link Rewriting API
+  version: '1.0'
+servers:
+  - url: https://liveinfo.org/api/44501X1515701
+paths:
+  /rewrite_links:
+    post:
+      operationId: post__rewrite_links
+      summary: Rewrites given URLs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - urls
+              properties:
+                urls:
+                  type: array
+                  items:
+                    type: string
+                  description: "List of URLs to be rewritten."
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  original_urls:
+                    type: array
+                    items:
+                      type: string
+                  rewritten_urls:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+components:
+  schemas: {}
+  </pre>
+
+  <hr />
+  <p>Privacy Policy: <button onclick="copyPrivacy()">Copy</button></p>
+  <pre id="privacyPolicy">https://liveinfo.org/pp</pre>
+
+  <hr />
+  <p>Add this to the top of your GPT prompt: <button onclick="copyInstructions()">Copy</button></p>
+  <pre id="instructions">
+Whenever you mention products or services ...
+(etc etc)
+Authentication: None needed.
+  </pre>
+
+<script>
+function copyOpenApi() {
+  const text = document.getElementById('openapiSpec').innerText;
+  navigator.clipboard.writeText(text);
+  alert('OpenAPI spec copied!');
+}
+function copyPrivacy() {
+  const text = document.getElementById('privacyPolicy').innerText;
+  navigator.clipboard.writeText(text);
+  alert('Privacy policy copied!');
+}
+function copyInstructions() {
+  const text = document.getElementById('instructions').innerText;
+  navigator.clipboard.writeText(text);
+  alert('GPT instructions copied!');
+}
+</script>
+</body>
+</html>
+`;
+
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
 
@@ -33,12 +141,13 @@ export function registerRoutes(app: Express): Server {
     max: 100 // limit each IP to 100 requests per windowMs
   });
 
-  // Link rewriting endpoint
-  app.post("/api/rewrite", linkLimiter, async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).send("Not logged in");
-    }
+  // Protected details route
+  app.get("/details", ensureAuthenticated, (req, res) => {
+    res.type("html").send(detailsHtml);
+  });
 
+  // Link rewriting endpoint
+  app.post("/api/rewrite", linkLimiter, ensureAuthenticated, async (req, res) => {
     const { url, source } = req.body;
     if (!url || !source) {
       return res.status(400).send("URL and source are required");
@@ -102,11 +211,7 @@ export function registerRoutes(app: Express): Server {
   });
 
   // Links listing endpoint
-  app.get("/api/links", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).send("Not logged in");
-    }
-
+  app.get("/api/links", ensureAuthenticated, async (req, res) => {
     try {
       const userLinks = await db.select()
         .from(links)
@@ -120,11 +225,7 @@ export function registerRoutes(app: Express): Server {
   });
 
   // OpenAPI spec endpoint
-  app.get("/api/openapi", (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).send("Not logged in");
-    }
-
+  app.get("/api/openapi", ensureAuthenticated, (req, res) => {
     const spec = {
       openapi: "3.0.0",
       info: {
@@ -185,23 +286,6 @@ export function registerRoutes(app: Express): Server {
               },
               "400": {
                 description: "Invalid input"
-              },
-              "500": {
-                description: "Server error"
-              }
-            }
-          }
-        },
-        "/api/links": {
-          get: {
-            summary: "Get all links for the user",
-            security: [{cookieAuth: []}],
-            responses: {
-              "200": {
-                description: "List of links"
-              },
-              "401": {
-                description: "Not authenticated"
               },
               "500": {
                 description: "Server error"
