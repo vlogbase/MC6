@@ -7,15 +7,15 @@ import { Button } from "@/components/ui/button";
 import { LogOut, Copy, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 
 interface OAuthCredentials {
   client_id: string;
   client_secret: string;
-  authorization_url: string;
   token_url: string;
   scopes: string[];
-  token_exchange_method: "basic_auth" | "post";
+  authorization_url?: string;
+  token_exchange_method?: string;
 }
 
 export default function Home() {
@@ -27,27 +27,26 @@ export default function Home() {
     queryKey: ["/api/oauth-credentials"],
   });
 
-  // Memoize stats calculations to prevent re-renders
-  const { transactionStats, revenueStats, clickStats } = useMemo(() => {
-    return {
-      transactionStats: {
-        total: transactions?.length || 0,
-        totalAmount: transactions?.reduce((sum, t) => sum + parseFloat(t.price), 0) || 0,
-        pendingCount: transactions?.filter(t => t.status_id === 'pending').length || 0
-      },
-      revenueStats: {
-        total: revenues?.reduce((sum, r) => sum + parseFloat(r.revenue), 0) || 0,
-        transactionCount: revenues?.reduce((sum, r) => sum + (r.transactions || 0), 0) || 0,
-        currency: revenues?.[0]?.currency || 'USD'
-      },
-      clickStats: {
-        total: clicks?.reduce((sum, c) => sum + (c.clicks || 0), 0) || 0,
-        channels: clicks ? new Set(clicks.map(c => c.channel_name)).size : 0
-      }
-    };
-  }, [transactions, revenues, clicks]);
+  // Memoize stats calculations
+  const stats = useMemo(() => ({
+    transactions: {
+      total: transactions?.length ?? 0,
+      totalAmount: transactions?.reduce((sum, t) => sum + parseFloat(t.price), 0) ?? 0,
+      pendingCount: transactions?.filter(t => t.status_id === 'pending').length ?? 0
+    },
+    revenue: {
+      total: revenues?.reduce((sum, r) => sum + parseFloat(r.revenue), 0) ?? 0,
+      transactionCount: revenues?.reduce((sum, r) => sum + (r.transactions || 0), 0) ?? 0,
+      currency: revenues?.[0]?.currency ?? 'USD'
+    },
+    clicks: {
+      total: clicks?.reduce((sum, c) => sum + (c.clicks || 0), 0) ?? 0,
+      channels: clicks ? new Set(clicks.map(c => c.channel_name)).size : 0
+    }
+  }), [transactions, revenues, clicks]);
 
-  async function handleLogout() {
+  // Handle logout
+  const handleLogout = async () => {
     try {
       await logout();
     } catch (error) {
@@ -57,9 +56,21 @@ export default function Home() {
         description: "Failed to logout",
       });
     }
-  }
+  };
 
-  async function copyToClipboard(text: string, successMessage: string) {
+  // Handle stats error
+  useEffect(() => {
+    if (statsError) {
+      toast({
+        variant: "destructive",
+        title: "Error loading stats",
+        description: statsError.message
+      });
+    }
+  }, [statsError, toast]);
+
+  // Handle copy to clipboard
+  const handleCopy = async (text: string, successMessage: string) => {
     try {
       await navigator.clipboard.writeText(text);
       toast({
@@ -73,14 +84,14 @@ export default function Home() {
         description: "Failed to copy to clipboard",
       });
     }
-  }
+  };
 
-  if (statsError) {
-    toast({
-      variant: "destructive",
-      title: "Error loading stats",
-      description: statsError.message
-    });
+  if (statsLoading || linksLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
   }
 
   const openApiSpec = {
@@ -88,7 +99,7 @@ export default function Home() {
     info: {
       title: "Link Rewriting API",
       version: "1.0.0",
-      description: `API for rewriting links for user: ${user?.username ?? ''}`
+      description: "API for rewriting links"
     },
     servers: [
       {
@@ -205,11 +216,11 @@ export default function Home() {
 
   const gptPrompt = `To use this API for rewriting URLs, follow these authentication steps:
 
-1. First, obtain an access token by making a POST request to \`${window.location.origin}/api/auth\` with:
+1. First, obtain an access token by making a POST request to ${window.location.origin}/api/auth with:
    - Content-Type: application/json
    - Body: {
-       "client_id": "${oauthCredentials?.client_id || ''}",
-       "client_secret": "${oauthCredentials?.client_secret || ''}"
+       "client_id": "${oauthCredentials?.client_id ?? ''}",
+       "client_secret": "${oauthCredentials?.client_secret ?? ''}"
      }
 
 2. From the response, extract the access_token.
@@ -218,51 +229,19 @@ export default function Home() {
    - Authorization: Bearer <your_access_token>
    - Content-Type: application/json
 
-4. To rewrite a URL, make a POST request to \`${window.location.origin}/api/rewrite\` with:
+4. To rewrite a URL, make a POST request to ${window.location.origin}/api/rewrite with:
    - Body: {
        "url": "original-url-here",
        "source": "source-identifier"
-     }
-
-Example flow:
-\`\`\`javascript
-// Step 1: Get access token
-const authResponse = await fetch("${window.location.origin}/api/auth", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    client_id: "${oauthCredentials?.client_id || ''}",
-    client_secret: "${oauthCredentials?.client_secret || ''}"
-  })
-});
-const { access_token } = await authResponse.json();
-
-// Step 2: Rewrite URL using the token
-const rewriteResponse = await fetch("${window.location.origin}/api/rewrite", {
-  method: "POST",
-  headers: {
-    "Authorization": \`Bearer \${access_token}\`,
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    url: "https://example.com/product",
-    source: "gpt-assistant"
-  })
-});
-const { rewrittenUrl } = await rewriteResponse.json();
-\`\`\`
-
-After obtaining the rewritten URL, you can use it in your response.
-
-Important: The access token expires after 1 hour. If you receive a 401 error, obtain a new token using Step 1.`;
+     }`;
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-8">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold">Welcome, {user?.username || "Guest"}</h1>
-            <p className="text-gray-600">User ID: {user?.id || "Not available"}</p>
+            <h1 className="text-3xl font-bold">Welcome, {user?.username ?? "Guest"}</h1>
+            <p className="text-gray-600">User ID: {user?.id ?? "Not available"}</p>
           </div>
           <Button onClick={handleLogout} variant="ghost">
             <LogOut className="mr-2 h-4 w-4" />
@@ -270,10 +249,91 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
           </Button>
         </div>
 
+        <Tabs defaultValue="stats" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="stats">Stats</TabsTrigger>
+            <TabsTrigger value="links">Links</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="stats">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Transactions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{stats.transactions.total}</p>
+                  <p className="text-sm text-gray-600">Total Amount: {stats.transactions.totalAmount}</p>
+                  <p className="text-sm text-gray-600">Pending: {stats.transactions.pendingCount}</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Revenue</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{stats.revenue.currency} {stats.revenue.total}</p>
+                  <p className="text-sm text-gray-600">Transactions: {stats.revenue.transactionCount}</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Clicks</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{stats.clicks.total}</p>
+                  <p className="text-sm text-gray-600">Active Channels: {stats.clicks.channels}</p>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="links">
+            {oauthCredentials && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>OAuth Credentials</CardTitle>
+                  <CardDescription>Your API access credentials</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium">Client ID</label>
+                    <div className="mt-1 relative">
+                      <pre className="p-2 bg-gray-100 rounded">{oauthCredentials.client_id}</pre>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-2 top-2"
+                        onClick={() => handleCopy(oauthCredentials.client_id, "Client ID copied!")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Client Secret</label>
+                    <div className="mt-1 relative">
+                      <pre className="p-2 bg-gray-100 rounded">{oauthCredentials.client_secret}</pre>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-2 top-2"
+                        onClick={() => handleCopy(oauthCredentials.client_secret, "Client Secret copied!")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
         <Tabs defaultValue="spec" className="space-y-4">
           <TabsList>
             <TabsTrigger value="spec">Spec</TabsTrigger>
-            <TabsTrigger value="stats">Stats</TabsTrigger>
           </TabsList>
 
           <TabsContent value="spec" className="space-y-4">
@@ -296,7 +356,7 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                         variant="ghost"
                         size="sm"
                         className="absolute top-2 right-2"
-                        onClick={() => copyToClipboard(oauthCredentials?.client_id || "", "Client ID copied!")}
+                        onClick={() => handleCopy(oauthCredentials?.client_id || "", "Client ID copied!")}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -313,7 +373,7 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                         variant="ghost"
                         size="sm"
                         className="absolute top-2 right-2"
-                        onClick={() => copyToClipboard(oauthCredentials?.client_secret || "", "Client Secret copied!")}
+                        onClick={() => handleCopy(oauthCredentials?.client_secret || "", "Client Secret copied!")}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -330,7 +390,7 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                         variant="ghost"
                         size="sm"
                         className="absolute top-2 right-2"
-                        onClick={() => copyToClipboard(oauthCredentials?.authorization_url || "", "Authorization URL copied!")}
+                        onClick={() => handleCopy(oauthCredentials?.authorization_url || "", "Authorization URL copied!")}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -347,7 +407,7 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                         variant="ghost"
                         size="sm"
                         className="absolute top-2 right-2"
-                        onClick={() => copyToClipboard(oauthCredentials?.token_url || "", "Token URL copied!")}
+                        onClick={() => handleCopy(oauthCredentials?.token_url || "", "Token URL copied!")}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -364,7 +424,7 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                         variant="ghost"
                         size="sm"
                         className="absolute top-2 right-2"
-                        onClick={() => copyToClipboard(oauthCredentials?.scopes?.join(" ") || "", "Scopes copied!")}
+                        onClick={() => handleCopy(oauthCredentials?.scopes?.join(" ") || "", "Scopes copied!")}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -401,7 +461,7 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                     variant="ghost"
                     size="sm"
                     className="absolute top-2 right-2"
-                    onClick={() => copyToClipboard(JSON.stringify(openApiSpec, null, 2), "OpenAPI spec copied!")}
+                    onClick={() => handleCopy(JSON.stringify(openApiSpec, null, 2), "OpenAPI spec copied!")}
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
@@ -425,188 +485,11 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                     variant="ghost"
                     size="sm"
                     className="absolute top-2 right-2"
-                    onClick={() => copyToClipboard(gptPrompt, "GPT prompt copied!")}
+                    onClick={() => handleCopy(gptPrompt, "GPT prompt copied!")}
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="stats">
-            <Card>
-              <CardHeader>
-                <CardTitle>Performance Statistics</CardTitle>
-                <CardDescription>
-                  View your affiliate performance metrics
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {statsLoading ? (
-                  <div className="flex justify-center items-center p-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                  </div>
-                ) : (
-                  <Tabs defaultValue="transactions" className="space-y-4">
-                    <TabsList>
-                      <TabsTrigger value="transactions">Transactions</TabsTrigger>
-                      <TabsTrigger value="revenue">Revenue</TabsTrigger>
-                      <TabsTrigger value="clicks">Clicks</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="transactions">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{transactionStats.total}</div>
-                            <p className="text-sm text-muted-foreground">Total Transactions</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">
-                              {transactions?.[0]?.currency} {transactionStats.totalAmount.toFixed(2)}
-                            </div>
-                            <p className="text-sm text-muted-foreground">Total Transaction Value</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{transactionStats.pendingCount}</div>
-                            <p className="text-sm text-muted-foreground">Pending Transactions</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                      <div className="border rounded-lg overflow-x-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left">Date</th>
-                              <th className="px-4 py-2 text-left">Advertiser</th>
-                              <th className="px-4 py-2 text-left">Order ID</th>
-                              <th className="px-4 py-2 text-left">Amount</th>
-                              <th className="px-4 py-2 text-left">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {transactions?.map((transaction: any) => (
-                              <tr key={transaction.id} className="border-t">
-                                <td className="px-4 py-2">
-                                  {new Date(transaction.sold).toLocaleDateString()}
-                                </td>
-                                <td className="px-4 py-2">{transaction.advertiser_name}</td>
-                                <td className="px-4 py-2">{transaction.order_id}</td>
-                                <td className="px-4 py-2">
-                                  {transaction.currency} {transaction.price}
-                                </td>
-                                <td className="px-4 py-2">{transaction.status_name}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="revenue">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">
-                              {revenueStats.currency} {revenueStats.total.toFixed(2)}
-                            </div>
-                            <p className="text-sm text-muted-foreground">Total Revenue</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{revenueStats.transactionCount}</div>
-                            <p className="text-sm text-muted-foreground">Total Transactions</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">
-                              {revenueStats.total > 0 && revenueStats.transactionCount > 0
-                                ? `${revenueStats.currency} ${(revenueStats.total / revenueStats.transactionCount).toFixed(2)}`
-                                : '-'}
-                            </div>
-                            <p className="text-sm text-muted-foreground">Average Revenue per Transaction</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                      <div className="border rounded-lg overflow-x-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left">Date</th>
-                              <th className="px-4 py-2 text-left">Advertiser</th>
-                              <th className="px-4 py-2 text-left">Revenue</th>
-                              <th className="px-4 py-2 text-left">Status</th>
-                              <th className="px-4 py-2 text-left">Transactions</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {revenues?.map((revenue: any) => (
-                              <tr key={`${revenue.day}-${revenue.advertiser_id}`} className="border-t">
-                                <td className="px-4 py-2">
-                                  {new Date(revenue.day).toLocaleDateString()}
-                                </td>
-                                <td className="px-4 py-2">{revenue.advertiser_name}</td>
-                                <td className="px-4 py-2">
-                                  {revenue.currency} {revenue.revenue}
-                                </td>
-                                <td className="px-4 py-2">{revenue.status_name}</td>
-                                <td className="px-4 py-2">{revenue.transactions}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="clicks">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{clickStats.total}</div>
-                            <p className="text-sm text-muted-foreground">Total Clicks</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{clickStats.channels}</div>
-                            <p className="text-sm text-muted-foreground">Active Channels</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                      <div className="border rounded-lg overflow-x-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left">Date</th>
-                              <th className="px-4 py-2 text-left">Advertiser</th>
-                              <th className="px-4 py-2 text-left">Clicks</th>
-                              <th className="px-4 py-2 text-left">Channel</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {clicks?.map((click: any) => (
-                              <tr key={`${click.day}-${click.advertiser_id}`} className="border-t">
-                                <td className="px-4 py-2">
-                                  {new Date(click.day).toLocaleDateString()}
-                                </td>
-                                <td className="px-4 py-2">{click.advertiser_name}</td>
-                                <td className="px-4 py-2">{click.clicks}</td>
-                                <td className="px-4 py-2">{click.channel_name}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                )}
               </CardContent>
             </Card>
           </TabsContent>
