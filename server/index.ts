@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 
 const app = express();
 app.use(express.json());
@@ -39,15 +40,13 @@ app.use((req, res, next) => {
 (async () => {
   const server = await registerRoutes(app);
 
-  // Error handling middleware
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    log(`Error: ${message}`);
-    res.status(status).json({ message });
-  });
+  // Add 404 handler for API routes
+  app.use('/api/*', notFoundHandler);
 
-  // Importantly only setup vite in development and after
+  // Global error handling middleware
+  app.use(errorHandler);
+
+  // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
   if (app.get("env") === "development") {
