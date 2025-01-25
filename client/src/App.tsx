@@ -7,6 +7,7 @@ import Home from "@/pages/home";
 import AuthPage from "@/pages/auth-page";
 import { useUser } from "@/hooks/use-user";
 import { Loader2 } from "lucide-react";
+import { useMemo } from "react";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useUser();
@@ -27,9 +28,13 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 }
 
 function Router() {
+  const ProtectedHome = useMemo(() => {
+    return () => <ProtectedRoute component={Home} />;
+  }, []);
+
   return (
     <Switch>
-      <Route path="/" component={() => <ProtectedRoute component={Home} />} />
+      <Route path="/" component={ProtectedHome} />
       <Route component={NotFound} />
     </Switch>
   );
