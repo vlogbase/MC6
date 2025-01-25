@@ -148,9 +148,13 @@ export function registerRoutes(app: Express): Server {
 
   // Link rewriting endpoint
   app.post("/api/rewrite", linkLimiter, ensureAuthenticated, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
     const { url, source } = req.body;
     if (!url || !source) {
-      return res.status(400).send("URL and source are required");
+      return res.status(400).json({ error: "URL and source are required" });
     }
 
     const cacheKey = generateCacheKey(req.user.id, url, source);
@@ -206,12 +210,16 @@ export function registerRoutes(app: Express): Server {
       res.json({ rewrittenUrl });
     } catch (error) {
       console.error('Error rewriting link:', error);
-      res.status(500).send("Failed to rewrite link");
+      res.status(500).json({ error: "Failed to rewrite link" });
     }
   });
 
   // Links listing endpoint
   app.get("/api/links", ensureAuthenticated, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
     try {
       const userLinks = await db.select()
         .from(links)
@@ -220,18 +228,18 @@ export function registerRoutes(app: Express): Server {
 
       res.json(userLinks);
     } catch (error) {
-      res.status(500).send("Failed to fetch links");
+      res.status(500).json({ error: "Failed to fetch links" });
     }
   });
 
   // OpenAPI spec endpoint
   app.get("/api/openapi", ensureAuthenticated, (req, res) => {
     const spec = {
-      openapi: "3.0.0",
+      openapi: "3.1.0",
       info: {
         title: "Link Rewriting API",
         version: "1.0.0",
-        description: `API for rewriting links with SSID: ${req.user.ssid}`
+        description: `API for rewriting links with SSID: ${req.user?.ssid}`
       },
       servers: [
         {
@@ -241,6 +249,7 @@ export function registerRoutes(app: Express): Server {
       paths: {
         "/api/rewrite": {
           post: {
+            operationId: "rewriteUrl",
             summary: "Rewrite a URL with affiliate information",
             security: [{ cookieAuth: [] }],
             requestBody: {
