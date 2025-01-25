@@ -1,6 +1,11 @@
-import type { Express, Request, Response, NextFunction } from "express";
+import express, { type Express, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { randomBytes } from "crypto";
+import { createServer } from "http";
+import { setupAuth, authenticateRequest } from "./auth";
+
+const app = express();
+const PORT = process.env.PORT || 3000;
 
 // In-memory store of { token -> { accessToken, userId, expiresAt } }
 const tokenStore = new Map<
@@ -134,3 +139,10 @@ export function setupAuth(app: Express) {
     });
   });
 }
+
+
+const httpServer = createServer(app);
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+});
+export default httpServer;
