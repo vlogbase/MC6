@@ -2,44 +2,47 @@ import { type Express, Request, Response, NextFunction } from "express";
 import session from "express-session";
 import createMemoryStore from "memorystore";
 import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import { type SelectUser } from "@db/schema"; //Preserving original import
+import { IVerifyOptions, Strategy as LocalStrategy } from "passport-local";
+import { scrypt, randomBytes, timingSafeEqual } from "crypto";
+import { promisify } from "util";
+import { users, insertUserSchema, type SelectUser } from "@db/schema";
+import { db } from "@db";
+import { eq } from "drizzle-orm";
 
-
-// For demonstration only — you can store users in a DB, or do something else
-// in your success callback below.
-const USERS_DB = new Map<string, any>(); // e.g. key by profile.id, store user object
-
-// You'll need actual client ID and secret from your Google OAuth credentials.
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "YOUR_GOOGLE_CLIENT_SECRET";
-
-// Minimal user type
-type User = {
-  id: string;
-  email?: string;
-  displayName?: string;
+const scryptAsync = promisify(scrypt);
+const crypto = {
+  hash: async (password: string) => {
+    const salt = randomBytes(16).toString("hex");
+    const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+    return `${buf.toString("hex")}.${salt}`;
+  },
+  compare: async (suppliedPassword: string, storedPassword: string) => {
+    const [hashedPassword, salt] = storedPassword.split(".");
+    const hashedPasswordBuf = Buffer.from(hashedPassword, "hex");
+    const suppliedPasswordBuf = (await scryptAsync(
+      suppliedPassword,
+      salt,
+      64
+    )) as Buffer;
+    return timingSafeEqual(hashedPasswordBuf, suppliedPasswordBuf);
+  },
 };
 
-// Add to the Express "request user" definition (if needed)
 declare global {
   namespace Express {
-    interface User extends User, SelectUser {} // Combining original and new User types
+    interface User extends SelectUser {}
   }
 }
 
 export function setupAuth(app: Express) {
-  // MemoryStore for the session
   const MemoryStore = createMemoryStore(session);
-
-  // Basic session -  Retaining parts of original session setup
   const sessionSettings: session.SessionOptions = {
     secret: process.env.REPL_ID || "porygon-supremacy",
     resave: false,
     saveUninitialized: false,
     cookie: {},
     store: new MemoryStore({
-      checkPeriod: 86400000, // prune expired entries every 24h
+      checkPeriod: 86400000,
     }),
   };
 
@@ -54,67 +57,131 @@ export function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
-  // Configure Google OAuth Strategy
   passport.use(
-    new GoogleStrategy(
-      {
-        clientID: GOOGLE_CLIENT_ID,
-        clientSecret: GOOGLE_CLIENT_SECRET,
-        callbackURL: "/auth/google/callback",
-      },
-      async (accessToken, refreshToken, profile, done) => {
-        // Example: store user in "DB"
-        let user: User = {
-          id: profile.id,
-          email: profile.emails?.[0]?.value,
-          displayName: profile.displayName,
-        };
-        USERS_DB.set(profile.id, user);
-        done(null, user);
+    new LocalStrategy(async (username, password, done) => {
+      try {
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.username, username))
+          .limit(1);
+
+        if (!user) {
+          return done(null, false, { message: "Incorrect username." });
+        }
+        const isMatch = await crypto.compare(password, user.password);
+        if (!isMatch) {
+          return done(null, false, { message: "Incorrect password." });
+        }
+        return done(null, user);
+      } catch (err) {
+        return done(err);
       }
-    )
+    })
   );
 
-  // Serialize: store user.id in session
-  passport.serializeUser((user: User, done) => {
+  passport.serializeUser((user, done) => {
     done(null, user.id);
   });
 
-  // Deserialize: fetch from your "DB"
-  passport.deserializeUser((id: string, done) => {
-    const user = USERS_DB.get(id);
-    if (!user) return done(new Error("User not found"));
-    done(null, user);
-  });
-
-  // Simple route: start OAuth
-  app.get("/auth/google",
-    passport.authenticate("google", { scope: ["profile", "email"] })
-  );
-
-  // OAuth callback route
-  app.get("/auth/google/callback",
-    passport.authenticate("google", { failureRedirect: "/auth/fail" }),
-    (req: Request, res: Response) => {
-      // If successful, redirect wherever you want
-      res.redirect("/details"); // e.g. your details page
+  passport.deserializeUser(async (id: number, done) => {
+    try {
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      done(null, user);
+    } catch (err) {
+      done(err);
     }
-  );
-
-  // If user not authenticated
-  app.get("/auth/fail", (req, res) => {
-    res.send("Failed to authenticate with Google.");
   });
 
-  // Logout route - Retaining logout functionality from original
-  app.post("/api/logout", (req, res, next) => {
+  app.post("/api/register", async (req, res, next) => {
+    try {
+      const result = insertUserSchema.safeParse(req.body);
+      if (!result.success) {
+        return res
+          .status(400)
+          .send("Invalid input: " + result.error.issues.map(i => i.message).join(", "));
+      }
+
+      const { username, password } = result.data;
+
+      const [existingUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.username, username))
+        .limit(1);
+
+      if (existingUser) {
+        return res.status(400).send("Username already exists");
+      }
+
+      const hashedPassword = await crypto.hash(password);
+
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          username,
+          password: hashedPassword,
+        })
+        .returning();
+
+      req.login(newUser, (err) => {
+        if (err) {
+          return next(err);
+        }
+        return res.json({
+          message: "Registration successful",
+          user: newUser,
+        });
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/login", (req, res, next) => {
+    const result = insertUserSchema.safeParse(req.body);
+    if (!result.success) {
+      return res
+        .status(400)
+        .send("Invalid input: " + result.error.issues.map(i => i.message).join(", "));
+    }
+
+    passport.authenticate("local", (err: any, user: Express.User, info: IVerifyOptions) => {
+      if (err) {
+        return next(err);
+      }
+
+      if (!user) {
+        return res.status(400).send(info.message ?? "Login failed");
+      }
+
+      req.logIn(user, (err) => {
+        if (err) {
+          return next(err);
+        }
+
+        return res.json({
+          message: "Login successful",
+          user: user,
+        });
+      });
+    })(req, res, next);
+  });
+
+  app.post("/api/logout", (req, res) => {
     req.logout((err) => {
-      if (err) return next(err);
+      if (err) {
+        return res.status(500).send("Logout failed");
+      }
+
       res.json({ message: "Logout successful" });
     });
   });
 
-  //Retaining user info route from original
   app.get("/api/user", (req, res) => {
     if (req.isAuthenticated()) {
       return res.json(req.user);
@@ -124,8 +191,7 @@ export function setupAuth(app: Express) {
   });
 }
 
-// Helper to protect routes with OAuth
 export function ensureAuthenticated(req: Request, res: Response, next: NextFunction) {
   if (req.isAuthenticated()) return next();
-  return res.status(401).send("You must log in with Google first.");
+  return res.status(401).send("You must log in first.");
 }

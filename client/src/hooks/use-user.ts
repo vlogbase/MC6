@@ -3,6 +3,7 @@ import type { InsertUser, SelectUser } from "@db/schema";
 
 type RequestResult = {
   ok: true;
+  user: SelectUser;
 } | {
   ok: false;
   message: string;
@@ -30,7 +31,8 @@ async function handleRequest(
       return { ok: false, message };
     }
 
-    return { ok: true };
+    const data = await response.json();
+    return { ok: true, user: data.user };
   } catch (e: any) {
     return { ok: false, message: e.toString() };
   }
@@ -60,7 +62,7 @@ export function useUser() {
   const queryClient = useQueryClient();
 
   const { data: user, error, isLoading } = useQuery<SelectUser | null, Error>({
-    queryKey: ['user'],
+    queryKey: ['/api/user'],
     queryFn: fetchUser,
     staleTime: Infinity,
     retry: false
@@ -68,22 +70,26 @@ export function useUser() {
 
   const loginMutation = useMutation<RequestResult, Error, InsertUser>({
     mutationFn: (userData) => handleRequest('/api/login', 'POST', userData),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user'] });
+    onSuccess: (result) => {
+      if (result.ok) {
+        queryClient.setQueryData(['/api/user'], result.user);
+      }
     },
   });
 
   const logoutMutation = useMutation<RequestResult, Error>({
     mutationFn: () => handleRequest('/api/logout', 'POST'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user'] });
+      queryClient.setQueryData(['/api/user'], null);
     },
   });
 
   const registerMutation = useMutation<RequestResult, Error, InsertUser>({
     mutationFn: (userData) => handleRequest('/api/register', 'POST', userData),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user'] });
+    onSuccess: (result) => {
+      if (result.ok) {
+        queryClient.setQueryData(['/api/user'], result.user);
+      }
     },
   });
 
