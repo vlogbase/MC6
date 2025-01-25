@@ -16,28 +16,6 @@ const urlCache = new Map<
 >();
 const CACHE_TTL = 3600000; // 1 hour in ms
 
-function isAmazonUrl(url: string): boolean {
-  try {
-    const parsedUrl = new URL(url);
-    return parsedUrl.hostname.includes('amazon.');
-  } catch {
-    return false;
-  }
-}
-
-function appendAmazonAffiliateTag(url: string): string {
-  try {
-    const parsedUrl = new URL(url);
-    const affiliateTag = 'turbofiliates-21';
-
-    // If URL already has parameters, append with &, otherwise use ?
-    const separator = parsedUrl.search ? '&' : '?';
-    return `${url}${separator}tag=${affiliateTag}`;
-  } catch {
-    return url; // If URL parsing fails, return original
-  }
-}
-
 async function getRewrittenUrl(
   originalUrl: string,
   userId: number,
@@ -70,20 +48,12 @@ async function getRewrittenUrl(
         }
       }
     }
-
-    // If no Strackr link found, check if it's Amazon
-    if (!trackingLink) {
-      if (isAmazonUrl(originalUrl)) {
-        trackingLink = appendAmazonAffiliateTag(originalUrl);
-      } else {
-        trackingLink = originalUrl; // Fallback to original URL
-      }
-    }
+    if (!trackingLink) throw new Error("No tracking link found from Strackr");
 
     // Store in in-memory cache
     urlCache.set(cacheKey, { rewrittenUrl: trackingLink, timestamp: Date.now() });
 
-    // Also store in DB
+    // Also store in DB if you want them visible to user #1 or something
     await db.insert(links).values({
       userId,
       originalUrl,
@@ -94,25 +64,7 @@ async function getRewrittenUrl(
     return trackingLink;
   } catch (error: any) {
     console.error("Strackr linkbuilder error:", error?.message || error);
-
-    // If API call fails, try Amazon or return original
-    if (isAmazonUrl(originalUrl)) {
-      const amazonLink = appendAmazonAffiliateTag(originalUrl);
-
-      // Store in cache and DB even for Amazon links
-      urlCache.set(cacheKey, { rewrittenUrl: amazonLink, timestamp: Date.now() });
-      await db.insert(links).values({
-        userId,
-        originalUrl,
-        rewrittenUrl: amazonLink,
-        source,
-      });
-
-      return amazonLink;
-    }
-
-    // Last resort: return original URL
-    return originalUrl;
+    throw error;
   }
 }
 
