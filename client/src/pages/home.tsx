@@ -1,42 +1,27 @@
-import { useUser } from "@/hooks/use-user";
 import { useLinks } from "@/hooks/use-links";
 import { useStrackrStats } from "@/hooks/use-strackr-stats";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { LogOut, Copy, Loader2 } from "lucide-react";
+import { Copy, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 
 interface OAuthCredentials {
   client_id: string;
   client_secret: string;
-  authorization_url: string;
   token_url: string;
   scopes: string[];
-  token_exchange_method: "basic_auth" | "post";
+  token_exchange_method: "post";
 }
 
 export default function Home() {
   const { toast } = useToast();
-  const { user, logout } = useUser();
   const { links, isLoading: linksLoading } = useLinks();
   const { transactions, revenues, clicks, isLoading: statsLoading, error: statsError } = useStrackrStats();
   const { data: oauthCredentials } = useQuery<OAuthCredentials>({
     queryKey: ["/api/oauth-credentials"],
   });
-
-  async function handleLogout() {
-    try {
-      await logout();
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to logout",
-      });
-    }
-  }
 
   async function copyToClipboard(text: string, successMessage: string) {
     try {
@@ -59,7 +44,7 @@ export default function Home() {
     info: {
       title: "Link Rewriting API",
       version: "1.0.0",
-      description: `API for rewriting links with SSID: ${user?.ssid ?? ''}`
+      description: "API for automatic link rewriting"
     },
     servers: [
       {
@@ -71,7 +56,7 @@ export default function Home() {
         post: {
           operationId: "rewriteUrl",
           summary: "Rewrite a URL with affiliate information",
-          security: [{ cookieAuth: [] }],
+          security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
             content: {
@@ -93,28 +78,8 @@ export default function Home() {
                 }
               }
             },
-            "400": {
-              description: "Invalid input",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse"
-                  }
-                }
-              }
-            },
             "401": {
-              description: "Not authenticated",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse"
-                  }
-                }
-              }
-            },
-            "500": {
-              description: "Server error",
+              description: "Invalid token",
               content: {
                 "application/json": {
                   schema: {
@@ -149,7 +114,7 @@ export default function Home() {
           properties: {
             rewrittenUrl: {
               type: "string",
-              description: "The rewritten URL with SSID and source parameters"
+              description: "The rewritten URL with affiliate parameters"
             }
           }
         },
@@ -165,10 +130,9 @@ export default function Home() {
         }
       },
       securitySchemes: {
-        cookieAuth: {
-          type: "apiKey",
-          in: "cookie",
-          name: "connect.sid"
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer"
         }
       }
     }
@@ -224,42 +188,18 @@ No user authentication is required - the API handles everything automatically.`;
     });
   }
 
-  // Calculate summary statistics
-  const transactionStats = {
-    total: transactions?.length || 0,
-    totalAmount: transactions?.reduce((sum, t) => sum + parseFloat(t.price), 0) || 0,
-    pendingCount: transactions?.filter(t => t.status_id === 'pending').length || 0
-  };
-
-  const revenueStats = {
-    total: revenues?.reduce((sum, r) => sum + parseFloat(r.revenue), 0) || 0,
-    transactionCount: revenues?.reduce((sum, r) => sum + (r.transactions || 0), 0) || 0,
-    currency: revenues?.[0]?.currency || 'USD'
-  };
-
-  const clickStats = {
-    total: clicks?.reduce((sum, c) => sum + (c.clicks || 0), 0) || 0,
-    channels: [...new Set(clicks?.map(c => c.channel_name) || [])].length
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-8">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold">Welcome, {user?.username || "Guest"}</h1>
-            <p className="text-gray-600">Your SSID: {user?.ssid || "Not available"}</p>
-          </div>
-          <Button onClick={handleLogout} variant="ghost">
-            <LogOut className="mr-2 h-4 w-4" />
-            Logout
-          </Button>
+        <div>
+          <h1 className="text-3xl font-bold">Link Rewriting API Documentation</h1>
+          <p className="text-gray-600">Integration guide and API credentials</p>
         </div>
 
         <Tabs defaultValue="spec" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="spec">Spec</TabsTrigger>
-            <TabsTrigger value="stats">Stats</TabsTrigger>
+            <TabsTrigger value="spec">API Documentation</TabsTrigger>
+            <TabsTrigger value="stats">Statistics</TabsTrigger>
           </TabsList>
 
           <TabsContent value="spec" className="space-y-4">
@@ -267,7 +207,7 @@ No user authentication is required - the API handles everything automatically.`;
               <CardHeader>
                 <CardTitle>Authentication Credentials</CardTitle>
                 <CardDescription>
-                  Copy these credentials into the GPT's authentication configuration
+                  Use these credentials to authenticate your API requests
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -307,23 +247,6 @@ No user authentication is required - the API handles everything automatically.`;
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-1">Authorization URL</label>
-                    <div className="relative">
-                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
-                        {oauthCredentials?.authorization_url || ''}
-                      </pre>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={() => copyToClipboard(oauthCredentials?.authorization_url || "", "Authorization URL copied!")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div>
                     <label className="block text-sm font-medium mb-1">Token URL</label>
                     <div className="relative">
                       <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
@@ -356,17 +279,6 @@ No user authentication is required - the API handles everything automatically.`;
                       </Button>
                     </div>
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Token Exchange Method</label>
-                    <div className="p-4 bg-gray-100 rounded-lg">
-                      <p className="text-sm text-gray-700">
-                        {oauthCredentials?.token_exchange_method === "basic_auth"
-                          ? "Basic authorization header"
-                          : "Default (POST request)"}
-                      </p>
-                    </div>
-                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -375,7 +287,7 @@ No user authentication is required - the API handles everything automatically.`;
               <CardHeader>
                 <CardTitle>OpenAPI Specification</CardTitle>
                 <CardDescription>
-                  Copy your API specification to integrate with your applications
+                  Copy this OpenAPI specification to integrate with your applications
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -397,9 +309,9 @@ No user authentication is required - the API handles everything automatically.`;
 
             <Card>
               <CardHeader>
-                <CardTitle>GPT Prompt</CardTitle>
+                <CardTitle>GPT Integration Guide</CardTitle>
                 <CardDescription>
-                  Instructions to add to your GPT prompt for automatic link rewriting
+                  Add these instructions to your GPT's configuration
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -434,164 +346,9 @@ No user authentication is required - the API handles everything automatically.`;
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                   </div>
                 ) : (
-                  <Tabs defaultValue="transactions" className="space-y-4">
-                    <TabsList>
-                      <TabsTrigger value="transactions">Transactions</TabsTrigger>
-                      <TabsTrigger value="revenue">Revenue</TabsTrigger>
-                      <TabsTrigger value="clicks">Clicks</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="transactions">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{transactionStats.total}</div>
-                            <p className="text-sm text-muted-foreground">Total Transactions</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">
-                              {transactions?.[0]?.currency} {transactionStats.totalAmount.toFixed(2)}
-                            </div>
-                            <p className="text-sm text-muted-foreground">Total Transaction Value</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{transactionStats.pendingCount}</div>
-                            <p className="text-sm text-muted-foreground">Pending Transactions</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                      <div className="border rounded-lg overflow-x-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left">Date</th>
-                              <th className="px-4 py-2 text-left">Advertiser</th>
-                              <th className="px-4 py-2 text-left">Order ID</th>
-                              <th className="px-4 py-2 text-left">Amount</th>
-                              <th className="px-4 py-2 text-left">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {transactions?.map((transaction: any) => (
-                              <tr key={transaction.id} className="border-t">
-                                <td className="px-4 py-2">
-                                  {new Date(transaction.sold).toLocaleDateString()}
-                                </td>
-                                <td className="px-4 py-2">{transaction.advertiser_name}</td>
-                                <td className="px-4 py-2">{transaction.order_id}</td>
-                                <td className="px-4 py-2">
-                                  {transaction.currency} {transaction.price}
-                                </td>
-                                <td className="px-4 py-2">{transaction.status_name}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="revenue">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">
-                              {revenueStats.currency} {revenueStats.total.toFixed(2)}
-                            </div>
-                            <p className="text-sm text-muted-foreground">Total Revenue</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{revenueStats.transactionCount}</div>
-                            <p className="text-sm text-muted-foreground">Total Transactions</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">
-                              {revenueStats.total > 0 && revenueStats.transactionCount > 0
-                                ? `${revenueStats.currency} ${(revenueStats.total / revenueStats.transactionCount).toFixed(2)}`
-                                : '-'}
-                            </div>
-                            <p className="text-sm text-muted-foreground">Average Revenue per Transaction</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                      <div className="border rounded-lg overflow-x-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left">Date</th>
-                              <th className="px-4 py-2 text-left">Advertiser</th>
-                              <th className="px-4 py-2 text-left">Revenue</th>
-                              <th className="px-4 py-2 text-left">Status</th>
-                              <th className="px-4 py-2 text-left">Transactions</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {revenues?.map((revenue: any) => (
-                              <tr key={`${revenue.day}-${revenue.advertiser_id}`} className="border-t">
-                                <td className="px-4 py-2">
-                                  {new Date(revenue.day).toLocaleDateString()}
-                                </td>
-                                <td className="px-4 py-2">{revenue.advertiser_name}</td>
-                                <td className="px-4 py-2">
-                                  {revenue.currency} {revenue.revenue}
-                                </td>
-                                <td className="px-4 py-2">{revenue.status_name}</td>
-                                <td className="px-4 py-2">{revenue.transactions}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="clicks">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{clickStats.total}</div>
-                            <p className="text-sm text-muted-foreground">Total Clicks</p>
-                          </CardContent>
-                        </Card>
-                        <Card>
-                          <CardContent className="pt-6">
-                            <div className="text-2xl font-bold">{clickStats.channels}</div>
-                            <p className="text-sm text-muted-foreground">Active Channels</p>
-                          </CardContent>
-                        </Card>
-                      </div>
-                      <div className="border rounded-lg overflow-x-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left">Date</th>
-                              <th className="px-4 py-2 text-left">Advertiser</th>
-                              <th className="px-4 py-2 text-left">Clicks</th>
-                              <th className="px-4 py-2 text-left">Channel</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {clicks?.map((click: any) => (
-                              <tr key={`${click.day}-${click.advertiser_id}`} className="border-t">
-                                <td className="px-4 py-2">
-                                  {new Date(click.day).toLocaleDateString()}
-                                </td>
-                                <td className="px-4 py-2">{click.advertiser_name}</td>
-                                <td className="px-4 py-2">{click.clicks}</td>
-                                <td className="px-4 py-2">{click.channel_name}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
+                  <div className="text-center p-8 text-gray-500">
+                    Statistics will be available after your first rewritten link is used
+                  </div>
                 )}
               </CardContent>
             </Card>

@@ -2,11 +2,7 @@ import { type Express, Request, Response, NextFunction } from "express";
 import session from "express-session";
 import createMemoryStore from "memorystore";
 import passport from "passport";
-import { IVerifyOptions, Strategy as LocalStrategy } from "passport-local";
 import { randomBytes } from "crypto";
-import { users } from "@db/schema";
-import { db } from "@db";
-import { eq } from "drizzle-orm";
 import rateLimit from 'express-rate-limit';
 
 // OAuth Configuration
@@ -22,7 +18,6 @@ const tokenStore = new Map<string, {
 
 declare global {
   namespace Express {
-    interface User extends SelectUser {}
     interface Request {
       oauthToken?: { accessToken: string };
     }
@@ -47,7 +42,7 @@ export function verifyOAuthToken(req: Request, res: Response, next: NextFunction
 }
 
 export function authenticateRequest(req: Request, res: Response, next: NextFunction) {
-  if (req.isAuthenticated() || req.oauthToken) {
+  if (req.oauthToken) {
     return next();
   }
   res.status(401).json({ error: "Authentication required" });
