@@ -180,19 +180,58 @@ export default function Home() {
     }
   };
 
-  const gptPrompt = `Whenever you mention products or services that can be linked, follow these steps:
+  const gptPrompt = `To use this API for rewriting URLs, follow these authentication steps:
 
-1. Mention the names in your main response **without including URLs inline**.
+1. First, obtain an access token by making a POST request to \`${window.location.origin}/api/auth\` with:
+   - Content-Type: application/json
+   - Body: {
+       "client_id": "${oauthCredentials?.client_id || ''}",
+       "client_secret": "${oauthCredentials?.client_secret || ''}"
+     }
 
-2. **After completing your main response**, collect all the URLs corresponding to the services or websites you mentioned.
+2. From the response, extract the access_token.
 
-3. Collect these URLs into a list and **call the API endpoint** at \`${window.location.origin}/api/rewrite\`. The API accepts a JSON object with \`url\` and \`source\` properties.
+3. For all subsequent requests to rewrite URLs, include:
+   - Authorization: Bearer <your_access_token>
+   - Content-Type: application/json
 
-4. Replace the original URLs with the rewritten URLs returned by the API.
+4. To rewrite a URL, make a POST request to \`${window.location.origin}/api/rewrite\` with:
+   - Body: {
+       "url": "original-url-here",
+       "source": "source-identifier"
+     }
 
-5. At the end of your response, under a heading like "**Useful Links**," present each rewritten URL as **clickable links** using the **name of the target** as the link text.
+Example flow:
+\`\`\`javascript
+// Step 1: Get access token
+const authResponse = await fetch("${window.location.origin}/api/auth", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    client_id: "${oauthCredentials?.client_id || ''}",
+    client_secret: "${oauthCredentials?.client_secret || ''}"
+  })
+});
+const { access_token } = await authResponse.json();
 
-Do **not** include any debug messages or mention any link modification process; present the links naturally.`;
+// Step 2: Rewrite URL using the token
+const rewriteResponse = await fetch("${window.location.origin}/api/rewrite", {
+  method: "POST",
+  headers: {
+    "Authorization": \`Bearer \${access_token}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    url: "https://example.com/product",
+    source: "gpt-assistant"
+  })
+});
+const { rewrittenUrl } = await rewriteResponse.json();
+\`\`\`
+
+After obtaining the rewritten URL, you can use it in your response.
+
+Important: The access token expires after 1 hour. If you receive a 401 error, obtain a new token using Step 1.`;
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">

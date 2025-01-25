@@ -8,6 +8,7 @@ import { promisify } from "util";
 import { users, insertUserSchema, type SelectUser } from "@db/schema";
 import { db } from "@db";
 import { eq } from "drizzle-orm";
+import rateLimit from 'express-rate-limit';
 
 const scryptAsync = promisify(scrypt);
 
@@ -75,6 +76,16 @@ export function authenticateRequest(req: Request, res: Response, next: NextFunct
 }
 
 export function setupAuth(app: Express) {
+  // Trust proxy for rate limiter
+  app.set('trust proxy', 1);
+
+  // Rate limiting for auth endpoints
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: { error: 'Too many requests, please try again later.' }
+  });
+
   const MemoryStore = createMemoryStore(session);
   const sessionSettings: session.SessionOptions = {
     secret: process.env.REPL_ID || "porygon-supremacy",
@@ -87,7 +98,6 @@ export function setupAuth(app: Express) {
   };
 
   if (app.get("env") === "production") {
-    app.set("trust proxy", 1);
     sessionSettings.cookie = {
       secure: true,
     };
@@ -139,7 +149,7 @@ export function setupAuth(app: Express) {
   });
 
   // OAuth endpoints
-  app.post("/api/auth", async (req, res) => {
+  app.post("/api/auth", authLimiter, async (req, res) => {
     const { client_id, client_secret } = req.body;
 
     if (client_id !== OAUTH_CLIENT_ID || client_secret !== OAUTH_CLIENT_SECRET) {
@@ -163,7 +173,7 @@ export function setupAuth(app: Express) {
     });
   });
 
-  app.post("/api/token", async (req, res) => {
+  app.post("/api/token", authLimiter, async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Basic ')) {
       return res.status(401).json({ error: "Missing authorization header" });
