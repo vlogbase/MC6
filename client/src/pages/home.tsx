@@ -26,15 +26,7 @@ export default function Home() {
 
   async function handleLogout() {
     try {
-      const result = await logout();
-      if (!result.ok) {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: result.message,
-        });
-        return;
-      }
+      await logout();
     } catch (error) {
       toast({
         variant: "destructive",

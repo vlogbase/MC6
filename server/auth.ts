@@ -288,30 +288,45 @@ export function setupAuth(app: Express) {
   });
 
   app.post("/api/logout", (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(200).json({ message: "Already logged out" });
+    }
+
     req.logout((err) => {
       if (err) {
-        return res.status(500).send("Logout failed");
+        return res.status(500).json({ 
+          error: "Logout failed",
+          message: err.message 
+        });
       }
-
-      res.json({ message: "Logout successful" });
+      req.session.destroy((err) => {
+        if (err) {
+          return res.status(500).json({ 
+            error: "Session destruction failed",
+            message: err.message 
+          });
+        }
+        res.json({ message: "Logout successful" });
+      });
     });
   });
 
-  app.get("/api/user", authenticateRequest, (req, res) => {
-    // Use oauthToken or req.user depending on authentication method
-    const userData = req.oauthToken 
-      ? { id: req.oauthToken.userId } 
-      : { 
-          id: req.user!.id,
-          username: req.user!.username,
-          ssid: req.user!.ssid,
-          createdAt: req.user!.createdAt
-        };
-    res.json(userData);
+  app.get("/api/user", (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    // Send full user data including SSID
+    res.json({
+      id: req.user!.id,
+      username: req.user!.username,
+      ssid: req.user!.ssid,
+      createdAt: req.user!.createdAt
+    });
   });
 }
 
 export function ensureAuthenticated(req: Request, res: Response, next: NextFunction) {
   if (req.isAuthenticated()) return next();
-  return res.status(401).send("You must log in first.");
+  return res.status(401).json({ error: "Authentication required" });
 }

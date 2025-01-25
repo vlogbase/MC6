@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InsertUser, SelectUser } from "@db/schema";
+import { useToast } from "@/hooks/use-toast";
 
 type RequestResult = {
   ok: true;
-  user: SelectUser;
+  user?: SelectUser;
 } | {
   ok: false;
   message: string;
@@ -27,7 +28,7 @@ async function fetchUser(): Promise<SelectUser | null> {
   }
 
   const data = await response.json();
-  return data as SelectUser;  // Ensure proper typing of the response
+  return data;  // API returns the user data directly
 }
 
 async function handleRequest(
@@ -61,6 +62,7 @@ async function handleRequest(
 
 export function useUser() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: user, error, isLoading } = useQuery<SelectUser | null, Error>({
     queryKey: ['/api/user'],
@@ -72,8 +74,12 @@ export function useUser() {
   const loginMutation = useMutation<RequestResult, Error, InsertUser>({
     mutationFn: (userData) => handleRequest('/api/login', 'POST', userData),
     onSuccess: (result) => {
-      if (result.ok) {
+      if (result.ok && result.user) {
         queryClient.setQueryData(['/api/user'], result.user);
+        toast({
+          title: "Success",
+          description: "Successfully logged in",
+        });
       }
     },
   });
@@ -82,14 +88,22 @@ export function useUser() {
     mutationFn: () => handleRequest('/api/logout', 'POST'),
     onSuccess: () => {
       queryClient.setQueryData(['/api/user'], null);
+      toast({
+        title: "Success",
+        description: "Successfully logged out",
+      });
     },
   });
 
   const registerMutation = useMutation<RequestResult, Error, InsertUser>({
     mutationFn: (userData) => handleRequest('/api/register', 'POST', userData),
     onSuccess: (result) => {
-      if (result.ok) {
+      if (result.ok && result.user) {
         queryClient.setQueryData(['/api/user'], result.user);
+        toast({
+          title: "Success",
+          description: "Successfully registered",
+        });
       }
     },
   });
