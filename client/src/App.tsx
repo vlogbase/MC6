@@ -7,9 +7,8 @@ import Home from "@/pages/home";
 import AuthPage from "@/pages/auth-page";
 import { useUser } from "@/hooks/use-user";
 import { Loader2 } from "lucide-react";
-import { useMemo } from "react";
 
-function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useUser();
 
   if (isLoading) {
@@ -24,17 +23,17 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
     return <AuthPage />;
   }
 
-  return <Component />;
+  return <>{children}</>;
 }
 
 function Router() {
-  const ProtectedHome = useMemo(() => {
-    return () => <ProtectedRoute component={Home} />;
-  }, []);
-
   return (
     <Switch>
-      <Route path="/" component={ProtectedHome} />
+      <Route path="/">
+        <RequireAuth>
+          <Home />
+        </RequireAuth>
+      </Route>
       <Route component={NotFound} />
     </Switch>
   );
