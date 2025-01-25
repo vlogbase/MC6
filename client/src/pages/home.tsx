@@ -6,26 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { LogOut, Copy, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useQuery } from "@tanstack/react-query";
 import { useMemo, useEffect } from "react";
-
-interface OAuthCredentials {
-  client_id: string;
-  client_secret: string;
-  token_url: string;
-  scopes: string[];
-  authorization_url?: string;
-  token_exchange_method?: string;
-}
 
 export default function Home() {
   const { toast } = useToast();
   const { user, logout } = useUser();
   const { links, isLoading: linksLoading } = useLinks();
   const { transactions, revenues, clicks, isLoading: statsLoading, error: statsError } = useStrackrStats();
-  const { data: oauthCredentials } = useQuery<OAuthCredentials>({
-    queryKey: ["/api/oauth-credentials"],
-  });
 
   // Memoize stats calculations
   const stats = useMemo(() => ({
@@ -99,7 +86,7 @@ export default function Home() {
     info: {
       title: "Link Rewriting API",
       version: "1.0.0",
-      description: "API for rewriting links"
+      description: "API for rewriting affiliate links with custom tracking"
     },
     servers: [
       {
@@ -111,7 +98,7 @@ export default function Home() {
         post: {
           operationId: "rewriteUrl",
           summary: "Rewrite a URL with affiliate information",
-          security: [{ cookieAuth: [] }],
+          security: [{ ApiKeyAuth: [] }],
           requestBody: {
             required: true,
             content: {
@@ -144,7 +131,7 @@ export default function Home() {
               }
             },
             "401": {
-              description: "Not authenticated",
+              description: "Missing or invalid API key",
               content: {
                 "application/json": {
                   schema: {
@@ -179,7 +166,7 @@ export default function Home() {
             },
             source: {
               type: "string",
-              description: "Source identifier"
+              description: "Source identifier for tracking"
             }
           }
         },
@@ -205,35 +192,36 @@ export default function Home() {
         }
       },
       securitySchemes: {
-        cookieAuth: {
+        ApiKeyAuth: {
           type: "apiKey",
-          in: "cookie",
-          name: "connect.sid"
+          in: "header",
+          name: "X-API-KEY"
         }
       }
     }
   };
 
-  const gptPrompt = `To use this API for rewriting URLs, follow these authentication steps:
+  const gptPrompt = `To use this API for rewriting URLs, include your API key in the X-API-KEY header:
 
-1. First, obtain an access token by making a POST request to ${window.location.origin}/api/auth with:
+1. Add the following header to all requests:
+   X-API-KEY: ${user?.apiKey}
+
+2. Make a POST request to ${window.location.origin}/api/rewrite with:
    - Content-Type: application/json
    - Body: {
-       "client_id": "${oauthCredentials?.client_id ?? ''}",
-       "client_secret": "${oauthCredentials?.client_secret ?? ''}"
+       "url": "https://example.com/product",
+       "source": "my-source"
      }
 
-2. From the response, extract the access_token.
+3. You'll receive a response with the rewritten URL:
+   {
+     "rewrittenUrl": "https://tracking.example.com/product?ssid=YOUR_SSID&source=my-source"
+   }
 
-3. For all subsequent requests to rewrite URLs, include:
-   - Authorization: Bearer <your_access_token>
-   - Content-Type: application/json
-
-4. To rewrite a URL, make a POST request to ${window.location.origin}/api/rewrite with:
-   - Body: {
-       "url": "original-url-here",
-       "source": "source-identifier"
-     }`;
+4. Error responses will include a message:
+   {
+     "error": "Error description"
+   }`;
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
@@ -252,7 +240,7 @@ export default function Home() {
         <Tabs defaultValue="stats" className="space-y-4">
           <TabsList>
             <TabsTrigger value="stats">Stats</TabsTrigger>
-            <TabsTrigger value="links">Links</TabsTrigger>
+            <TabsTrigger value="integration">API Integration</TabsTrigger>
           </TabsList>
 
           <TabsContent value="stats">
@@ -290,45 +278,52 @@ export default function Home() {
             </div>
           </TabsContent>
 
-          <TabsContent value="links">
-            {oauthCredentials && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>OAuth Credentials</CardTitle>
-                  <CardDescription>Your API access credentials</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
+          <TabsContent value="integration">
+            <Card>
+              <CardHeader>
+                <CardTitle>Your API Key</CardTitle>
+                <CardDescription>
+                  Use this key to authenticate your API requests
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium">Client ID</label>
-                    <div className="mt-1 relative">
-                      <pre className="p-2 bg-gray-100 rounded">{oauthCredentials.client_id}</pre>
+                    <label className="block text-sm font-medium mb-1">API Key (Custom Header)</label>
+                    <div className="relative">
+                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
+                        {user?.apiKey || ''}
+                      </pre>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="absolute right-2 top-2"
-                        onClick={() => handleCopy(oauthCredentials.client_id, "Client ID copied!")}
+                        className="absolute top-2 right-2"
+                        onClick={() => handleCopy(user?.apiKey || "", "API key copied!")}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
+
                   <div>
-                    <label className="text-sm font-medium">Client Secret</label>
-                    <div className="mt-1 relative">
-                      <pre className="p-2 bg-gray-100 rounded">{oauthCredentials.client_secret}</pre>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute right-2 top-2"
-                        onClick={() => handleCopy(oauthCredentials.client_secret, "Client Secret copied!")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
+                    <h3 className="text-lg font-semibold mb-2">How to Use</h3>
+                    <div className="bg-gray-100 rounded-lg p-4 space-y-2">
+                      <p className="text-sm text-gray-700">Add this header to your API requests:</p>
+                      <pre className="bg-gray-200 p-2 rounded">
+                        X-API-KEY: {user?.apiKey}
+                      </pre>
+                      <p className="text-sm text-gray-700 mt-4">Example curl request:</p>
+                      <pre className="bg-gray-200 p-2 rounded whitespace-pre-wrap">
+                        {`curl -X POST "${window.location.origin}/api/rewrite" \\
+  -H "X-API-KEY: ${user?.apiKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"url": "https://example.com", "source": "my-source"}'`}
+                      </pre>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
         <Tabs defaultValue="spec" className="space-y-4">
@@ -337,114 +332,6 @@ export default function Home() {
           </TabsList>
 
           <TabsContent value="spec" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Authentication Credentials</CardTitle>
-                <CardDescription>
-                  Copy these credentials into the GPT's authentication configuration
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Client ID</label>
-                    <div className="relative">
-                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
-                        {oauthCredentials?.client_id || ''}
-                      </pre>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={() => handleCopy(oauthCredentials?.client_id || "", "Client ID copied!")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Client Secret</label>
-                    <div className="relative">
-                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
-                        {oauthCredentials?.client_secret || ''}
-                      </pre>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={() => handleCopy(oauthCredentials?.client_secret || "", "Client Secret copied!")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Authorization URL</label>
-                    <div className="relative">
-                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
-                        {oauthCredentials?.authorization_url || ''}
-                      </pre>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={() => handleCopy(oauthCredentials?.authorization_url || "", "Authorization URL copied!")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Token URL</label>
-                    <div className="relative">
-                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
-                        {oauthCredentials?.token_url || ''}
-                      </pre>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={() => handleCopy(oauthCredentials?.token_url || "", "Token URL copied!")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Scope</label>
-                    <div className="relative">
-                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
-                        {oauthCredentials?.scopes?.join(" ") || ''}
-                      </pre>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={() => handleCopy(oauthCredentials?.scopes?.join(" ") || "", "Scopes copied!")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Token Exchange Method</label>
-                    <div className="p-4 bg-gray-100 rounded-lg">
-                      <p className="text-sm text-gray-700">
-                        {oauthCredentials?.token_exchange_method === "basic_auth"
-                          ? "Basic authorization header"
-                          : "Default (POST request)"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
             <Card>
               <CardHeader>
                 <CardTitle>OpenAPI Specification</CardTitle>
