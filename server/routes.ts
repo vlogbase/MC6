@@ -1,10 +1,10 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { setupAuth, authenticateRequest } from "./auth";
+import { verifyOAuthToken } from "./auth";
 import axios from "axios";
 import { db } from "@db";
 import { links } from "@db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 // Simple in-memory cache
 const urlCache = new Map<string, {
@@ -14,9 +14,9 @@ const urlCache = new Map<string, {
 
 const CACHE_TTL = 3600000; // 1 hour in milliseconds
 
-async function getRewrittenUrl(originalUrl: string, userId: number, source: string) {
+async function getRewrittenUrl(originalUrl: string, source: string) {
   // Generate cache key
-  const cacheKey = `${userId}:${originalUrl}:${source}`;
+  const cacheKey = `${originalUrl}:${source}`;
 
   // Check cache first
   const cached = urlCache.get(cacheKey);
@@ -63,7 +63,6 @@ async function getRewrittenUrl(originalUrl: string, userId: number, source: stri
 
     // Store in database
     await db.insert(links).values({
-      userId,
       originalUrl,
       rewrittenUrl: trackingLink,
       source
@@ -93,24 +92,16 @@ async function fetchStrackrStats(endpoint: string, params: Record<string, string
 }
 
 export function registerRoutes(app: Express): Server {
-  // Setup OAuth and auth routes
-  setupAuth(app);
-
   // Rewrite URL endpoint
-  app.post("/api/rewrite", authenticateRequest, async (req, res) => {
+  app.post("/api/rewrite", verifyOAuthToken, async (req, res) => {
     try {
       const { url, source } = req.body;
-      const userId = req.user?.id || req.oauthToken?.userId;
 
       if (!url || !source) {
         return res.status(400).json({ error: "URL and source are required" });
       }
 
-      if (!userId) {
-        return res.status(401).json({ error: "User ID not found" });
-      }
-
-      const rewrittenUrl = await getRewrittenUrl(url, userId, source);
+      const rewrittenUrl = await getRewrittenUrl(url, source);
       res.json({ rewrittenUrl });
     } catch (error: any) {
       console.error("Rewrite error:", error);
@@ -122,7 +113,7 @@ export function registerRoutes(app: Express): Server {
   });
 
   // Strackr Stats endpoints
-  app.get("/api/stats/:type", authenticateRequest, async (req, res) => {
+  app.get("/api/stats/:type", verifyOAuthToken, async (req, res) => {
     try {
       const { type } = req.params;
       const { timeStart, timeEnd } = req.query;
@@ -149,23 +140,20 @@ export function registerRoutes(app: Express): Server {
   });
 
   // Get user's links
-  app.get("/api/links", authenticateRequest, async (req, res) => {
+  app.get("/api/links", verifyOAuthToken, async (req, res) => {
     try {
-      const userId = req.user?.id || req.oauthToken?.userId;
-      if (!userId) {
-        return res.status(401).json({ error: "User ID not found" });
-      }
-
       const userLinks = await db
         .select()
         .from(links)
-        .where(eq(links.userId, userId))
         .orderBy(links.createdAt);
 
       res.json(userLinks);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching links:", error);
-      res.status(500).json({ error: "Failed to fetch links" });
+      res.status(500).json({ 
+        error: "Failed to fetch links",
+        message: error.message 
+      });
     }
   });
 

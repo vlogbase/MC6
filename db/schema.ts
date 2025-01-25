@@ -2,17 +2,17 @@ import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { nanoid } from 'nanoid';
 
+// Keep users table for backward compatibility
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").unique().notNull(),
   password: text("password").notNull(),
-  ssid: text("ssid").unique().notNull().$defaultFn(() => nanoid(12)),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const links = pgTable("links", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id).notNull(),
+  userId: integer("user_id").references(() => users.id), // Make userId optional
   originalUrl: text("original_url").notNull(),
   rewrittenUrl: text("rewritten_url").notNull(),
   source: text("source").notNull(),
