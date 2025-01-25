@@ -174,62 +174,58 @@ export default function Home() {
     }
   };
 
-  const gptPrompt = `To use this API for rewriting URLs, follow these steps:
+  const gptPrompt = `To use this API for rewriting URLs, follow these authentication steps:
 
-1. First, obtain an access token by making a POST request to \`${window.location.origin}/api/auth\`:
-   Headers:
+1. First, obtain an access token by making a POST request to \`${window.location.origin}/api/auth\` with:
+   - Content-Type: application/json
+   - Body: {
+       "client_id": "${oauthCredentials?.client_id || ''}",
+       "client_secret": "${oauthCredentials?.client_secret || ''}"
+     }
+
+2. From the response, extract the access_token.
+
+3. For all subsequent requests to rewrite URLs, include:
+   - Authorization: Bearer <your_access_token>
    - Content-Type: application/json
 
-   Body:
-   {
-     "client_id": "${oauthCredentials?.client_id || ''}",
-     "client_secret": "${oauthCredentials?.client_secret || ''}"
-   }
+4. To rewrite a URL, make a POST request to \`${window.location.origin}/api/rewrite\` with:
+   - Body: {
+       "url": "original-url-here",
+       "source": "source-identifier"
+     }
 
-2. Use the received access_token in the Authorization header for all rewrite requests:
-   Headers:
-   - Authorization: Bearer <access_token>
-   - Content-Type: application/json
-
-3. Make rewrite requests to \`${window.location.origin}/api/rewrite\`:
-   Body:
-   {
-     "url": "original-url-here",
-     "source": "source-identifier"
-   }
-
-Example code:
+Example flow:
 \`\`\`javascript
-async function getRewrittenUrl(originalUrl) {
-  // Get access token
-  const authResponse = await fetch("${window.location.origin}/api/auth", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: "${oauthCredentials?.client_id || ''}",
-      client_secret: "${oauthCredentials?.client_secret || ''}"
-    })
-  });
-  const { access_token } = await authResponse.json();
+// Step 1: Get access token
+const authResponse = await fetch("${window.location.origin}/api/auth", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    client_id: "${oauthCredentials?.client_id || ''}",
+    client_secret: "${oauthCredentials?.client_secret || ''}"
+  })
+});
+const { access_token } = await authResponse.json();
 
-  // Rewrite URL
-  const rewriteResponse = await fetch("${window.location.origin}/api/rewrite", {
-    method: "POST",
-    headers: {
-      "Authorization": \`Bearer \${access_token}\`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      url: originalUrl,
-      source: "gpt-assistant"
-    })
-  });
-  const { rewrittenUrl } = await rewriteResponse.json();
-  return rewrittenUrl;
-}
+// Step 2: Rewrite URL using the token
+const rewriteResponse = await fetch("${window.location.origin}/api/rewrite", {
+  method: "POST",
+  headers: {
+    "Authorization": \`Bearer \${access_token}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    url: "https://example.com/product",
+    source: "gpt-assistant"
+  })
+});
+const { rewrittenUrl } = await rewriteResponse.json();
 \`\`\`
 
-Note: Access tokens expire after 1 hour. If you receive a 401 error, obtain a new token using step 1.`;
+After obtaining the rewritten URL, you can use it in your response.
+
+Important: The access token expires after 1 hour. If you receive a 401 error, obtain a new token using Step 1.`;
 
   if (statsError) {
     toast({
@@ -280,9 +276,9 @@ Note: Access tokens expire after 1 hour. If you receive a 401 error, obtain a ne
           <TabsContent value="spec" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>OAuth Credentials</CardTitle>
+                <CardTitle>Authentication Credentials</CardTitle>
                 <CardDescription>
-                  API credentials for automatic link rewriting via OAuth
+                  Copy these credentials into the GPT's authentication configuration
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -412,9 +408,9 @@ Note: Access tokens expire after 1 hour. If you receive a 401 error, obtain a ne
 
             <Card>
               <CardHeader>
-                <CardTitle>GPT Integration Instructions</CardTitle>
+                <CardTitle>GPT Prompt</CardTitle>
                 <CardDescription>
-                  Add these instructions to your GPT for automatic OAuth authentication and link rewriting
+                  Instructions to add to your GPT prompt for automatic link rewriting
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -426,7 +422,7 @@ Note: Access tokens expire after 1 hour. If you receive a 401 error, obtain a ne
                     variant="ghost"
                     size="sm"
                     className="absolute top-2 right-2"
-                    onClick={() => copyToClipboard(gptPrompt, "GPT instructions copied!")}
+                    onClick={() => copyToClipboard(gptPrompt, "GPT prompt copied!")}
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
