@@ -12,18 +12,20 @@ import rateLimit from 'express-rate-limit';
 
 const scryptAsync = promisify(scrypt);
 
-// OAuth Configuration
+// For demonstration only. We keep a set of OAuth tokens in memory.
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || "affiliate-link-manager-client";
-const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || randomBytes(32).toString('hex');
+const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || randomBytes(32).toString("hex");
 const OAUTH_SCOPES = ["rewrite"];
+const tokenStore = new Map<
+  string, // token
+  {
+    accessToken: string;
+    userId: number;
+    expiresAt: number;
+  }
+>();
 
-// Store OAuth tokens
-const tokenStore = new Map<string, {
-  accessToken: string,
-  userId: number,
-  expiresAt: number
-}>();
-
+// Minimal crypto helpers for password hashing
 const crypto = {
   hash: async (password: string) => {
     const salt = randomBytes(16).toString("hex");
@@ -33,11 +35,7 @@ const crypto = {
   compare: async (suppliedPassword: string, storedPassword: string) => {
     const [hashedPassword, salt] = storedPassword.split(".");
     const hashedPasswordBuf = Buffer.from(hashedPassword, "hex");
-    const suppliedPasswordBuf = (await scryptAsync(
-      suppliedPassword,
-      salt,
-      64
-    )) as Buffer;
+    const suppliedPasswordBuf = (await scryptAsync(suppliedPassword, salt, 64)) as Buffer;
     return timingSafeEqual(hashedPasswordBuf, suppliedPasswordBuf);
   },
 };
@@ -51,41 +49,46 @@ declare global {
   }
 }
 
+/**
+ * Middleware that checks for a Bearer token in the Authorization header.
+ * If present (and valid), we store `req.oauthToken = { userId }`.
+ */
 export function verifyOAuthToken(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (!authHeader?.startsWith("Bearer ")) {
     return next();
   }
-
   const token = authHeader.slice(7);
   const tokenData = tokenStore.get(token);
-
   if (!tokenData || tokenData.expiresAt < Date.now()) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
-
   req.oauthToken = { userId: tokenData.userId };
   next();
 }
 
+/**
+ * This is used by routes that *should* require an authenticated user (session or token).
+ * For GPT usage, we simply do NOT call this in /api/rewrite or /api/stats, so it
+ * never forces a login redirect.
+ */
 export function authenticateRequest(req: Request, res: Response, next: NextFunction) {
   if (req.isAuthenticated() || req.oauthToken) {
     return next();
   }
-  res.status(401).json({ error: "Authentication required" });
+  return res.status(401).json({ error: "Authentication required" });
 }
 
 export function setupAuth(app: Express) {
-  // Trust proxy for rate limiter
-  app.set('trust proxy', 1);
-
   // Rate limiting for auth endpoints
+  app.set("trust proxy", 1);
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
-    message: { error: 'Too many requests, please try again later.' }
+    max: 100,
+    message: { error: "Too many requests, please try again later." },
   });
 
+  // Basic session setup
   const MemoryStore = createMemoryStore(session);
   const sessionSettings: session.SessionOptions = {
     secret: process.env.REPL_ID || "porygon-supremacy",
@@ -96,18 +99,21 @@ export function setupAuth(app: Express) {
       checkPeriod: 86400000, // prune expired entries every 24h
     }),
   };
-
   if (app.get("env") === "production") {
-    sessionSettings.cookie = {
-      secure: true,
-    };
+    sessionSettings.cookie = { secure: true };
   }
 
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
+  // If we find a Bearer token, we parse it into req.oauthToken:
   app.use(verifyOAuthToken);
 
+  /**
+   * ---------------------------------------------------------------------
+   * PASSPORT LOCAL STRATEGY
+   * ---------------------------------------------------------------------
+   */
   passport.use(
     new LocalStrategy(async (username, password, done) => {
       try {
@@ -116,13 +122,12 @@ export function setupAuth(app: Express) {
           .from(users)
           .where(eq(users.username, username))
           .limit(1);
-
         if (!user) {
-          return done(null, false, { message: "Incorrect username." });
+          return done(null, false, { message: "Incorrect username." } as IVerifyOptions);
         }
         const isMatch = await crypto.compare(password, user.password);
         if (!isMatch) {
-          return done(null, false, { message: "Incorrect password." });
+          return done(null, false, { message: "Incorrect password." } as IVerifyOptions);
         }
         return done(null, user);
       } catch (err) {
@@ -134,54 +139,51 @@ export function setupAuth(app: Express) {
   passport.serializeUser((user, done) => {
     done(null, user.id);
   });
-
   passport.deserializeUser(async (id: number, done) => {
     try {
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, id))
-        .limit(1);
+      const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
       done(null, user);
     } catch (err) {
       done(err);
     }
   });
 
-  // OAuth endpoints
+  /**
+   * ---------------------------------------------------------------------
+   * OPTIONAL: OAuth-like endpoints for bot access or service accounts
+   * ---------------------------------------------------------------------
+   */
   app.post("/api/auth", authLimiter, async (req, res) => {
     const { client_id, client_secret } = req.body;
-
     if (client_id !== OAUTH_CLIENT_ID || client_secret !== OAUTH_CLIENT_SECRET) {
       return res.status(401).json({ error: "Invalid client credentials" });
     }
-
-    // For OAuth flow, create a token without requiring user login
-    // This is a simplified version - in production you'd want to associate this with a specific bot/service account
-    const accessToken = randomBytes(32).toString('hex');
+    // For demonstration, we create a short-lived "Bearer token" for userId=1
+    const accessToken = randomBytes(32).toString("hex");
     tokenStore.set(accessToken, {
       accessToken,
-      userId: 1, // Use a system/bot account ID
-      expiresAt: Date.now() + (60 * 60 * 1000) // 1 hour expiry
+      userId: 1,
+      expiresAt: Date.now() + 60 * 60 * 1000, // 1 hour
     });
-
     res.json({
       access_token: accessToken,
       token_type: "Bearer",
       expires_in: 3600,
-      scope: OAUTH_SCOPES.join(" ")
+      scope: OAUTH_SCOPES.join(" "),
     });
   });
 
   app.post("/api/token", authLimiter, async (req, res) => {
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Basic ')) {
-      return res.status(401).json({ error: "Missing authorization header" });
+    if (!authHeader?.startsWith("Basic ")) {
+      return res.status(401).json({ error: "Missing or invalid auth header" });
     }
-
-    const [clientId, clientSecret] = Buffer.from(authHeader.slice(6), 'base64')
+    const [clientId, clientSecret] = Buffer.from(
+      authHeader.slice(6),
+      "base64"
+    )
       .toString()
-      .split(':');
+      .split(":");
 
     if (clientId !== OAUTH_CLIENT_ID || clientSecret !== OAUTH_CLIENT_SECRET) {
       return res.status(401).json({ error: "Invalid client credentials" });
@@ -189,58 +191,59 @@ export function setupAuth(app: Express) {
 
     const { grant_type, refresh_token } = req.body;
     if (grant_type !== "refresh_token" || !refresh_token) {
-      return res.status(400).json({ error: "Invalid grant type or missing refresh token" });
+      return res
+        .status(400)
+        .json({ error: "Missing or invalid grant_type/refresh_token" });
     }
-
-    // Validate refresh token and issue new access token
-    // For now, we'll just issue a new token
-    const accessToken = randomBytes(32).toString('hex');
+    // In a real system, you'd verify refresh_token. For now, we just re-issue a token.
+    const accessToken = randomBytes(32).toString("hex");
+    tokenStore.set(accessToken, {
+      accessToken,
+      userId: 1,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+    });
     res.json({
       access_token: accessToken,
       token_type: "Bearer",
       expires_in: 3600,
-      scope: OAUTH_SCOPES.join(" ")
+      scope: OAUTH_SCOPES.join(" "),
     });
   });
 
-  // Export OAuth credentials for frontend use
   app.get("/api/oauth-credentials", (req, res) => {
     res.json({
       client_id: OAUTH_CLIENT_ID,
       client_secret: OAUTH_CLIENT_SECRET,
-      authorization_url: `${req.protocol}://${req.get('host')}/api/auth`,
-      token_url: `${req.protocol}://${req.get('host')}/api/token`,
+      authorization_url: `${req.protocol}://${req.get("host")}/api/auth`,
+      token_url: `${req.protocol}://${req.get("host")}/api/token`,
       scopes: OAUTH_SCOPES,
-      token_exchange_method: "basic_auth"
     });
   });
 
+  /**
+   * ---------------------------------------------------------------------
+   * REGISTER + LOGIN + LOGOUT + GET USER
+   * ---------------------------------------------------------------------
+   * You can keep these as-is for your user dashboard logic.
+   */
   app.post("/api/register", async (req, res, next) => {
     try {
       const result = insertUserSchema.safeParse(req.body);
       if (!result.success) {
-        return res
-          .status(400)
-          .send("Invalid input: " + result.error.issues.map(i => i.message).join(", "));
+        const errors = result.error.issues.map((i) => i.message).join(", ");
+        return res.status(400).send("Invalid input: " + errors);
       }
-
       const { username, password } = result.data;
-
-      // Check if user already exists
-      const [existingUser] = await db
+      // Check for existing
+      const [existing] = await db
         .select()
         .from(users)
         .where(eq(users.username, username))
         .limit(1);
-
-      if (existingUser) {
+      if (existing) {
         return res.status(400).send("Username already exists");
       }
-
-      // Hash the password
       const hashedPassword = await crypto.hash(password);
-
-      // Create the new user with SSID
       const [newUser] = await db
         .insert(users)
         .values({
@@ -248,19 +251,15 @@ export function setupAuth(app: Express) {
           password: hashedPassword,
         })
         .returning();
-
-      // Log the user in after registration
       req.login(newUser, (err) => {
-        if (err) {
-          return next(err);
-        }
-        return res.json({
+        if (err) return next(err);
+        res.json({
           message: "Registration successful",
           user: {
             id: newUser.id,
             username: newUser.username,
             ssid: newUser.ssid,
-            createdAt: newUser.createdAt
+            createdAt: newUser.createdAt,
           },
         });
       });
@@ -271,26 +270,19 @@ export function setupAuth(app: Express) {
 
   app.post("/api/login", (req, res, next) => {
     passport.authenticate("local", (err: any, user: Express.User, info: IVerifyOptions) => {
-      if (err) {
-        return next(err);
-      }
-
+      if (err) return next(err);
       if (!user) {
-        return res.status(400).send(info.message ?? "Login failed");
+        return res.status(400).send(info?.message ?? "Login failed");
       }
-
       req.logIn(user, (err) => {
-        if (err) {
-          return next(err);
-        }
-
-        return res.json({
+        if (err) return next(err);
+        res.json({
           message: "Login successful",
           user: {
             id: user.id,
             username: user.username,
             ssid: user.ssid,
-            createdAt: user.createdAt
+            createdAt: user.createdAt,
           },
         });
       });
@@ -301,20 +293,15 @@ export function setupAuth(app: Express) {
     if (!req.isAuthenticated()) {
       return res.status(200).json({ message: "Already logged out" });
     }
-
     req.logout((err) => {
       if (err) {
-        return res.status(500).json({ 
-          error: "Logout failed",
-          message: err.message 
-        });
+        return res.status(500).json({ error: "Logout failed", message: err.message });
       }
-      req.session.destroy((err) => {
-        if (err) {
-          return res.status(500).json({ 
-            error: "Session destruction failed",
-            message: err.message 
-          });
+      req.session.destroy((sessErr) => {
+        if (sessErr) {
+          return res
+            .status(500)
+            .json({ error: "Session destruction failed", message: sessErr.message });
         }
         res.json({ message: "Logout successful" });
       });
@@ -325,18 +312,11 @@ export function setupAuth(app: Express) {
     if (!req.isAuthenticated()) {
       return res.status(401).json({ error: "Not authenticated" });
     }
-
-    // Send full user data including SSID
     res.json({
       id: req.user!.id,
       username: req.user!.username,
       ssid: req.user!.ssid,
-      createdAt: req.user!.createdAt
+      createdAt: req.user!.createdAt,
     });
   });
-}
-
-export function ensureAuthenticated(req: Request, res: Response, next: NextFunction) {
-  if (req.isAuthenticated()) return next();
-  return res.status(401).json({ error: "Authentication required" });
 }
