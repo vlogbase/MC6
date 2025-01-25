@@ -9,6 +9,7 @@ import { users, insertUserSchema, type SelectUser } from "@db/schema";
 import { db } from "@db";
 import { eq } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
+import { nanoid } from 'nanoid'; // Added import for nanoid
 
 const scryptAsync = promisify(scrypt);
 
@@ -133,7 +134,11 @@ export function setupAuth(app: Express) {
   passport.use(
     new LocalStrategy(async (username, password, done) => {
       try {
-        const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.username, username))
+          .limit(1);
         if (!user) {
           return done(null, false, { message: "Incorrect username." } as IVerifyOptions);
         }
@@ -232,16 +237,24 @@ export function setupAuth(app: Express) {
       }
       const { username, password } = result.data;
       // check if user exists
-      const [existing] = await db.select().from(users).where(eq(users.username, username)).limit(1);
+      const [existing] = await db
+        .select()
+        .from(users)
+        .where(eq(users.username, username))
+        .limit(1);
       if (existing) {
         return res.status(400).send("Username already exists");
       }
-      // create user
+      // create user with API key
       const hashedPassword = await crypto.hash(password);
-      const [newUser] = await db.insert(users).values({
-        username,
-        password: hashedPassword,
-      }).returning();
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          username,
+          password: hashedPassword,
+          apiKey: nanoid(40), // Generate API key here
+        })
+        .returning();
 
       req.login(newUser, (err) => {
         if (err) return next(err);
@@ -250,6 +263,7 @@ export function setupAuth(app: Express) {
           user: {
             id: newUser.id,
             username: newUser.username,
+            apiKey: newUser.apiKey, // Include apiKey in response
             createdAt: newUser.createdAt,
           },
         });
@@ -307,5 +321,28 @@ export function setupAuth(app: Express) {
       username: req.user!.username,
       createdAt: req.user!.createdAt,
     });
+  });
+
+  // Add a new route to regenerate API key
+  app.post("/api/regenerate-api-key", authenticateRequest, async (req, res) => {
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const [updatedUser] = await db
+        .update(users)
+        .set({ apiKey: nanoid(40) })
+        .where(eq(users.id, req.user.id))
+        .returning();
+
+      res.json({
+        message: "API key regenerated successfully",
+        apiKey: updatedUser.apiKey,
+      });
+    } catch (error) {
+      console.error("Error regenerating API key:", error);
+      res.status(500).json({ error: "Failed to regenerate API key" });
+    }
   });
 }

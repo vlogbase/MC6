@@ -7,6 +7,7 @@ export const users = pgTable("users", {
   username: text("username").unique().notNull(),
   password: text("password").notNull(),
   ssid: text("ssid").unique().notNull().$defaultFn(() => nanoid(12)),
+  apiKey: text("api_key").unique(), 
   createdAt: timestamp("created_at").defaultNow(),
 });
 

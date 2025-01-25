@@ -2,13 +2,13 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import axios from "axios";
 import { db } from "@db";
-import { links } from "@db/schema";
+import { links, users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { setupAuth, authenticateRequest } from "./auth";
 
 // In-memory cache for rewriting
 const urlCache = new Map<
-  string, // `${userId}:${originalUrl}:${source}`
+  string,
   {
     rewrittenUrl: string;
     timestamp: number;
@@ -50,16 +50,8 @@ async function getRewrittenUrl(
     }
     if (!trackingLink) throw new Error("No tracking link found from Strackr");
 
-    // Store in in-memory cache
+    // Store base tracking link in cache
     urlCache.set(cacheKey, { rewrittenUrl: trackingLink, timestamp: Date.now() });
-
-    // Also store in DB if you want them visible to user #1 or something
-    await db.insert(links).values({
-      userId,
-      originalUrl,
-      rewrittenUrl: trackingLink,
-      source,
-    });
 
     return trackingLink;
   } catch (error: any) {
@@ -80,21 +72,19 @@ async function fetchStrackrStats(endpoint: string, params: Record<string, string
 }
 
 export function registerRoutes(app: Express): Server {
-  // Set up local+token auth
   setupAuth(app);
 
-  /**
-   * GPT endpoints => require Bearer token, but NOT local user session
-   * We'll do a minimal check:
-   *    if (req.oauthToken) => allow
-   *    else => 401
-   *
-   * If you want them fully open, remove the check.
-   */
-  app.post("/api/rewrite", (req, res) => {
-    // Check that there's a valid token
-    if (!req.oauthToken) {
-      return res.status(401).json({ error: "Missing or invalid Bearer token" });
+  // GPT endpoints - API key auth only
+  app.post("/api/rewrite", async (req, res) => {
+    const apiKey = req.headers["x-api-key"];
+    if (!apiKey) {
+      return res.status(401).json({ error: "Missing X-API-KEY header" });
+    }
+
+    // Find user by API key
+    const [user] = await db.select().from(users).where(eq(users.apiKey, apiKey as string)).limit(1);
+    if (!user) {
+      return res.status(401).json({ error: "Invalid API key" });
     }
 
     const { url, source } = req.body;
@@ -102,52 +92,62 @@ export function registerRoutes(app: Express): Server {
       return res.status(400).json({ error: "url and source are required" });
     }
 
-    // e.g. store them under userId=1 in DB, or userId= req.oauthToken.userId
-    // We'll use oauthToken.userId so if you minted that token for user=1, it’s 1 anyway
-    const userId = req.oauthToken.userId || 1;
+    try {
+      // Get base tracking link
+      const baseLink = await getRewrittenUrl(url, user.id, source);
 
-    getRewrittenUrl(url, userId, source)
-      .then((rewrittenUrl) => res.json({ rewrittenUrl }))
-      .catch((err: any) => {
-        console.error("Rewrite error:", err);
-        res.status(500).json({
-          error: "Failed to rewrite link",
-          message: err?.message || String(err),
-        });
+      // Append ssid and source parameters
+      const finalUrl = new URL(baseLink);
+      finalUrl.searchParams.set("ssid", user.ssid);
+      finalUrl.searchParams.set("source", source);
+
+      res.json({ rewrittenUrl: finalUrl.toString() });
+    } catch (err: any) {
+      console.error("Rewrite error:", err);
+      res.status(500).json({
+        error: "Failed to rewrite link",
+        message: err?.message || String(err),
       });
+    }
   });
 
-  app.get("/api/stats/:type", (req, res) => {
-    // Also require token or open it if you want
-    if (!req.oauthToken) {
-      return res.status(401).json({ error: "Missing or invalid Bearer token" });
+  app.get("/api/stats/:type", async (req, res) => {
+    const apiKey = req.headers["x-api-key"];
+    if (!apiKey) {
+      return res.status(401).json({ error: "Missing X-API-KEY header" });
     }
+
+    // Find user by API key
+    const [user] = await db.select().from(users).where(eq(users.apiKey, apiKey as string)).limit(1);
+    if (!user) {
+      return res.status(401).json({ error: "Invalid API key" });
+    }
+
     const { type } = req.params;
     const { timeStart, timeEnd } = req.query as { [key: string]: string };
     if (!timeStart || !timeEnd) {
       return res.status(400).json({ error: "timeStart and timeEnd are required" });
     }
 
-    const endpoint = `reports/${type}`;
-    fetchStrackrStats(endpoint, {
-      time_start: timeStart,
-      time_end: timeEnd,
-      time_type: "checked",
-    })
-      .then((data) => res.json(data))
-      .catch((err) => {
-        console.error(`Stats error for ${type}:`, err);
-        res.status(500).json({
-          error: `Failed to fetch ${type} stats`,
-          message: err?.message || String(err),
-        });
+    try {
+      const endpoint = `reports/${type}`;
+      const data = await fetchStrackrStats(endpoint, {
+        time_start: timeStart,
+        time_end: timeEnd,
+        time_type: "checked",
+        ssid: user.ssid, // Filter stats by user's ssid
       });
+      res.json(data);
+    } catch (err: any) {
+      console.error(`Stats error for ${type}:`, err);
+      res.status(500).json({
+        error: `Failed to fetch ${type} stats`,
+        message: err?.message || String(err),
+      });
+    }
   });
 
-  /**
-   * Protected endpoints for your local users:
-   * e.g. /api/links => must have user session or valid token
-   */
+  // Protected dashboard endpoints 
   app.get("/api/links", authenticateRequest, async (req, res) => {
     try {
       const userId = req.user?.id || req.oauthToken?.userId;
