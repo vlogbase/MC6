@@ -132,27 +132,20 @@ export function registerRoutes(app: Express): Server {
   setupAuth(app);
 
   /**
-   * GPT endpoints => require Bearer token, but NOT local user session
-   * We'll do a minimal check:
-   *    if (req.oauthToken) => allow
-   *    else => 401
-   *
-   * If you want them fully open, remove the check.
+   * GPT endpoints => now accept BOTH Bearer token AND session auth
+   * This allows the frontend to work with either authentication method
    */
-  app.post("/api/rewrite", (req, res) => {
-    // Check that there's a valid token
-    if (!req.oauthToken) {
-      return res.status(401).json({ error: "Missing or invalid Bearer token" });
-    }
-
+  app.post("/api/rewrite", authenticateRequest, (req, res) => {
     const { url, source } = req.body;
     if (!url || !source) {
       return res.status(400).json({ error: "url and source are required" });
     }
 
-    // e.g. store them under userId=1 in DB, or userId= req.oauthToken.userId
-    // We'll use oauthToken.userId so if you minted that token for user=1, it’s 1 anyway
-    const userId = req.oauthToken.userId || 1;
+    // Get userId from either session or token
+    const userId = req.user?.id || req.oauthToken?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
 
     getRewrittenUrl(url, userId, source)
       .then((rewrittenUrl) => res.json({ rewrittenUrl }))
@@ -165,11 +158,13 @@ export function registerRoutes(app: Express): Server {
       });
   });
 
-  app.get("/api/stats/:type", (req, res) => {
-    // Also require token or open it if you want
-    if (!req.oauthToken) {
-      return res.status(401).json({ error: "Missing or invalid Bearer token" });
+  app.get("/api/stats/:type", authenticateRequest, (req, res) => {
+    // Get userId from either session or token
+    const userId = req.user?.id || req.oauthToken?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Not authenticated" });
     }
+
     const { type } = req.params;
     const { timeStart, timeEnd } = req.query as { [key: string]: string };
     if (!timeStart || !timeEnd) {
@@ -194,7 +189,7 @@ export function registerRoutes(app: Express): Server {
 
   /**
    * Protected endpoints for your local users:
-   * e.g. /api/links => must have user session or valid token
+   * Already using authenticateRequest middleware which handles both auth types
    */
   app.get("/api/links", authenticateRequest, async (req, res) => {
     try {
