@@ -299,7 +299,15 @@ export function setupAuth(app: Express) {
 
   app.get("/api/user", authenticateRequest, (req, res) => {
     // Use oauthToken or req.user depending on authentication method
-    res.json(req.oauthToken ? { id: req.oauthToken.userId } : req.user);
+    const userData = req.oauthToken 
+      ? { id: req.oauthToken.userId } 
+      : { 
+          id: req.user!.id,
+          username: req.user!.username,
+          ssid: req.user!.ssid,
+          createdAt: req.user!.createdAt
+        };
+    res.json(userData);
   });
 }
 
