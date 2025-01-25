@@ -70,18 +70,7 @@ export default function Home() {
             content: {
               "application/json": {
                 schema: {
-                  type: "object",
-                  properties: {
-                    url: {
-                      type: "string",
-                      description: "The URL to rewrite"
-                    },
-                    source: {
-                      type: "string",
-                      description: "Source identifier"
-                    }
-                  },
-                  required: ["url", "source"]
+                  $ref: "#/components/schemas/RewriteUrlRequest"
                 }
               }
             }
@@ -92,13 +81,37 @@ export default function Home() {
               content: {
                 "application/json": {
                   schema: {
-                    type: "object",
-                    properties: {
-                      rewrittenUrl: {
-                        type: "string",
-                        description: "The rewritten URL with SSID and source parameters"
-                      }
-                    }
+                    $ref: "#/components/schemas/RewriteUrlResponse"
+                  }
+                }
+              }
+            },
+            "400": {
+              description: "Invalid input",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse"
+                  }
+                }
+              }
+            },
+            "401": {
+              description: "Not authenticated",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse"
+                  }
+                }
+              }
+            },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse"
                   }
                 }
               }
@@ -108,6 +121,42 @@ export default function Home() {
       }
     },
     components: {
+      schemas: {
+        RewriteUrlRequest: {
+          type: "object",
+          required: ["url", "source"],
+          properties: {
+            url: {
+              type: "string",
+              description: "The URL to rewrite"
+            },
+            source: {
+              type: "string",
+              description: "Source identifier"
+            }
+          }
+        },
+        RewriteUrlResponse: {
+          type: "object",
+          required: ["rewrittenUrl"],
+          properties: {
+            rewrittenUrl: {
+              type: "string",
+              description: "The rewritten URL with SSID and source parameters"
+            }
+          }
+        },
+        ErrorResponse: {
+          type: "object",
+          required: ["error"],
+          properties: {
+            error: {
+              type: "string",
+              description: "Error message"
+            }
+          }
+        }
+      },
       securitySchemes: {
         cookieAuth: {
           type: "apiKey",
@@ -200,6 +249,7 @@ Do **not** include any debug messages or mention any link modification process; 
                 </div>
               </CardContent>
             </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>GPT Prompt</CardTitle>
