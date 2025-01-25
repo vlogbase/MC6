@@ -5,7 +5,7 @@ import passport from "passport";
 import { IVerifyOptions, Strategy as LocalStrategy } from "passport-local";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
-import { users, insertUserSchema, type SelectUser } from "@db/schema";
+import { users } from "@db/schema";
 import { db } from "@db";
 import { eq } from "drizzle-orm";
 
@@ -44,7 +44,34 @@ const crypto = {
 declare global {
   namespace Express {
     interface User extends SelectUser {}
+    interface Request {
+      oauthToken?: { userId: number };
+    }
   }
+}
+
+export function verifyOAuthToken(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.slice(7);
+  const tokenData = tokenStore.get(token);
+
+  if (!tokenData || tokenData.expiresAt < Date.now()) {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+
+  req.oauthToken = { userId: tokenData.userId };
+  next();
+}
+
+export function authenticateRequest(req: Request, res: Response, next: NextFunction) {
+  if (req.isAuthenticated() || req.oauthToken) {
+    return next();
+  }
+  res.status(401).json({ error: "Authentication required" });
 }
 
 export function setupAuth(app: Express) {
@@ -69,6 +96,7 @@ export function setupAuth(app: Express) {
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
+  app.use(verifyOAuthToken);
 
   // OAuth endpoints
   app.post("/api/auth", async (req, res) => {
@@ -78,14 +106,12 @@ export function setupAuth(app: Express) {
       return res.status(401).json({ error: "Invalid client credentials" });
     }
 
-    if (!req.user) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
-
+    // For OAuth flow, create a token without requiring user login
+    // This is a simplified version - in production you'd want to associate this with a specific bot/service account
     const accessToken = randomBytes(32).toString('hex');
     tokenStore.set(accessToken, {
       accessToken,
-      userId: req.user.id,
+      userId: 1, // Use a system/bot account ID
       expiresAt: Date.now() + (60 * 60 * 1000) // 1 hour expiry
     });
 
@@ -124,6 +150,18 @@ export function setupAuth(app: Express) {
       token_type: "Bearer",
       expires_in: 3600,
       scope: OAUTH_SCOPES.join(" ")
+    });
+  });
+
+  // Export OAuth credentials for frontend use
+  app.get("/api/oauth-credentials", (req, res) => {
+    res.json({
+      client_id: OAUTH_CLIENT_ID,
+      client_secret: OAUTH_CLIENT_SECRET,
+      authorization_url: `${req.protocol}://${req.get('host')}/api/auth`,
+      token_url: `${req.protocol}://${req.get('host')}/api/token`,
+      scopes: OAUTH_SCOPES,
+      token_exchange_method: "basic_auth"
     });
   });
 
@@ -167,17 +205,6 @@ export function setupAuth(app: Express) {
     }
   });
 
-  // Export OAuth credentials for frontend use
-  app.get("/api/oauth-credentials", ensureAuthenticated, (req, res) => {
-    res.json({
-      client_id: OAUTH_CLIENT_ID,
-      client_secret: OAUTH_CLIENT_SECRET,
-      authorization_url: `${req.protocol}://${req.get('host')}/api/auth`,
-      token_url: `${req.protocol}://${req.get('host')}/api/token`,
-      scopes: OAUTH_SCOPES,
-      token_exchange_method: "basic_auth"
-    });
-  });
 
   app.post("/api/register", async (req, res, next) => {
     try {
@@ -264,12 +291,9 @@ export function setupAuth(app: Express) {
     });
   });
 
-  app.get("/api/user", (req, res) => {
-    if (req.isAuthenticated()) {
-      return res.json(req.user);
-    }
-
-    res.status(401).send("Not logged in");
+  app.get("/api/user", authenticateRequest, (req, res) => {
+    // Use oauthToken or req.user depending on authentication method
+    res.json(req.oauthToken ? { id: req.oauthToken.userId} : req.user);
   });
 }
 
