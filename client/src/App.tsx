@@ -8,7 +8,7 @@ import AuthPage from "@/pages/auth-page";
 import { useUser } from "@/hooks/use-user";
 import { Loader2 } from "lucide-react";
 
-function Router() {
+function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useUser();
 
   if (isLoading) {
@@ -19,14 +19,17 @@ function Router() {
     );
   }
 
-  // If no user is logged in, show the auth page
   if (!user) {
     return <AuthPage />;
   }
 
+  return <Component />;
+}
+
+function Router() {
   return (
     <Switch>
-      <Route path="/" component={Home} />
+      <Route path="/" component={() => <ProtectedRoute component={Home} />} />
       <Route component={NotFound} />
     </Switch>
   );
