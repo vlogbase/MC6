@@ -16,6 +16,17 @@ const urlCache = new Map<
 >();
 const CACHE_TTL = 3600000; // 1 hour in ms
 
+function isAmazonUrl(url: string): boolean {
+  return url.includes('amazon.') && 
+         (url.includes('/dp/') || url.includes('/gp/product/'));
+}
+
+function appendAmazonAffiliateTag(url: string): string {
+  const affiliateTag = 'turbofiliates-21';
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}tag=${affiliateTag}`;
+}
+
 async function getRewrittenUrl(
   originalUrl: string,
   userId: number,
@@ -27,7 +38,7 @@ async function getRewrittenUrl(
     return cached.rewrittenUrl;
   }
 
-  // Not in cache => call Strackr
+  // Try Strackr first
   try {
     const resp = await axios.get("https://api.strackr.com/v3/tools/linkbuilder", {
       params: {
@@ -48,24 +59,45 @@ async function getRewrittenUrl(
         }
       }
     }
-    if (!trackingLink) throw new Error("No tracking link found from Strackr");
 
-    // Store in in-memory cache
-    urlCache.set(cacheKey, { rewrittenUrl: trackingLink, timestamp: Date.now() });
+    if (trackingLink) {
+      // Store successful Strackr link in cache and DB
+      urlCache.set(cacheKey, { rewrittenUrl: trackingLink, timestamp: Date.now() });
+      await db.insert(links).values({
+        userId,
+        originalUrl,
+        rewrittenUrl: trackingLink,
+        source,
+      });
+      return trackingLink;
+    }
+  } catch (error: any) {
+    console.error("Strackr linkbuilder error:", error?.message || error);
+  }
 
-    // Also store in DB if you want them visible to user #1 or something
+  // If Strackr failed or returned no link, check if it's Amazon
+  if (isAmazonUrl(originalUrl)) {
+    const amazonAffiliateUrl = appendAmazonAffiliateTag(originalUrl);
+    // Store Amazon affiliate URL in cache and DB
+    urlCache.set(cacheKey, { rewrittenUrl: amazonAffiliateUrl, timestamp: Date.now() });
     await db.insert(links).values({
       userId,
       originalUrl,
-      rewrittenUrl: trackingLink,
+      rewrittenUrl: amazonAffiliateUrl,
       source,
     });
-
-    return trackingLink;
-  } catch (error: any) {
-    console.error("Strackr linkbuilder error:", error?.message || error);
-    throw error;
+    return amazonAffiliateUrl;
   }
+
+  // Fallback to original URL if neither Strackr nor Amazon processing worked
+  urlCache.set(cacheKey, { rewrittenUrl: originalUrl, timestamp: Date.now() });
+  await db.insert(links).values({
+    userId,
+    originalUrl,
+    rewrittenUrl: originalUrl,
+    source,
+  });
+  return originalUrl;
 }
 
 async function fetchStrackrStats(endpoint: string, params: Record<string, string>) {
