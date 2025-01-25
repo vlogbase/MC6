@@ -1,9 +1,10 @@
 import { useUser } from "@/hooks/use-user";
 import { useLinks } from "@/hooks/use-links";
+import { useStrackrStats } from "@/hooks/use-strackr-stats";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { LogOut, Copy } from "lucide-react";
+import { LogOut, Copy, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 
@@ -19,7 +20,8 @@ interface OAuthCredentials {
 export default function Home() {
   const { toast } = useToast();
   const { user, logout } = useUser();
-  const { links, isLoading } = useLinks();
+  const { links, isLoading: linksLoading } = useLinks();
+  const { transactions, revenues, clicks, isLoading: statsLoading, error: statsError } = useStrackrStats();
   const { data: oauthCredentials } = useQuery<OAuthCredentials>({
     queryKey: ["/api/oauth-credentials"],
   });
@@ -225,6 +227,14 @@ After obtaining the rewritten URL, you can use it in your response.
 
 Important: The access token expires after 1 hour. If you receive a 401 error, obtain a new token using Step 1.`;
 
+  if (statsError) {
+    toast({
+      variant: "destructive",
+      title: "Error loading stats",
+      description: statsError.message
+    });
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -412,105 +422,108 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Tabs defaultValue="transactions" className="space-y-4">
-                  <TabsList>
-                    <TabsTrigger value="transactions">Transactions</TabsTrigger>
-                    <TabsTrigger value="revenue">Revenue</TabsTrigger>
-                    <TabsTrigger value="clicks">Clicks</TabsTrigger>
-                  </TabsList>
+                {statsLoading ? (
+                  <div className="flex justify-center items-center p-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  <Tabs defaultValue="transactions" className="space-y-4">
+                    <TabsList>
+                      <TabsTrigger value="transactions">Transactions</TabsTrigger>
+                      <TabsTrigger value="revenue">Revenue</TabsTrigger>
+                      <TabsTrigger value="clicks">Clicks</TabsTrigger>
+                    </TabsList>
 
-                  <TabsContent value="transactions">
-                    <div className="border rounded-lg">
-                      <table className="w-full">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left">Date</th>
-                            <th className="px-4 py-2 text-left">Advertiser</th>
-                            <th className="px-4 py-2 text-left">Order ID</th>
-                            <th className="px-4 py-2 text-left">Amount</th>
-                            <th className="px-4 py-2 text-left">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {/* Assuming 'transactions' is fetched elsewhere and available here */}
-                          {transactions?.map((transaction: any) => (
-                            <tr key={transaction.id} className="border-t">
-                              <td className="px-4 py-2">
-                                {new Date(transaction.sold).toLocaleDateString()}
-                              </td>
-                              <td className="px-4 py-2">{transaction.advertiser_name}</td>
-                              <td className="px-4 py-2">{transaction.order_id}</td>
-                              <td className="px-4 py-2">
-                                {transaction.currency} {transaction.price}
-                              </td>
-                              <td className="px-4 py-2">{transaction.status_name}</td>
+                    <TabsContent value="transactions">
+                      <div className="border rounded-lg overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left">Date</th>
+                              <th className="px-4 py-2 text-left">Advertiser</th>
+                              <th className="px-4 py-2 text-left">Order ID</th>
+                              <th className="px-4 py-2 text-left">Amount</th>
+                              <th className="px-4 py-2 text-left">Status</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </TabsContent>
+                          </thead>
+                          <tbody>
+                            {transactions?.map((transaction: any) => (
+                              <tr key={transaction.id} className="border-t">
+                                <td className="px-4 py-2">
+                                  {new Date(transaction.sold).toLocaleDateString()}
+                                </td>
+                                <td className="px-4 py-2">{transaction.advertiser_name}</td>
+                                <td className="px-4 py-2">{transaction.order_id}</td>
+                                <td className="px-4 py-2">
+                                  {transaction.currency} {transaction.price}
+                                </td>
+                                <td className="px-4 py-2">{transaction.status_name}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </TabsContent>
 
-                  <TabsContent value="revenue">
-                    <div className="border rounded-lg">
-                      <table className="w-full">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left">Date</th>
-                            <th className="px-4 py-2 text-left">Advertiser</th>
-                            <th className="px-4 py-2 text-left">Revenue</th>
-                            <th className="px-4 py-2 text-left">Status</th>
-                            <th className="px-4 py-2 text-left">Transactions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {/* Assuming 'revenues' is fetched elsewhere and available here */}
-                          {revenues?.map((revenue: any) => (
-                            <tr key={`${revenue.day}-${revenue.advertiser_id}`} className="border-t">
-                              <td className="px-4 py-2">
-                                {new Date(revenue.day).toLocaleDateString()}
-                              </td>
-                              <td className="px-4 py-2">{revenue.advertiser_name}</td>
-                              <td className="px-4 py-2">
-                                {revenue.currency} {revenue.revenue}
-                              </td>
-                              <td className="px-4 py-2">{revenue.status_name}</td>
-                              <td className="px-4 py-2">{revenue.transactions}</td>
+                    <TabsContent value="revenue">
+                      <div className="border rounded-lg overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left">Date</th>
+                              <th className="px-4 py-2 text-left">Advertiser</th>
+                              <th className="px-4 py-2 text-left">Revenue</th>
+                              <th className="px-4 py-2 text-left">Status</th>
+                              <th className="px-4 py-2 text-left">Transactions</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </TabsContent>
+                          </thead>
+                          <tbody>
+                            {revenues?.map((revenue: any) => (
+                              <tr key={`${revenue.day}-${revenue.advertiser_id}`} className="border-t">
+                                <td className="px-4 py-2">
+                                  {new Date(revenue.day).toLocaleDateString()}
+                                </td>
+                                <td className="px-4 py-2">{revenue.advertiser_name}</td>
+                                <td className="px-4 py-2">
+                                  {revenue.currency} {revenue.revenue}
+                                </td>
+                                <td className="px-4 py-2">{revenue.status_name}</td>
+                                <td className="px-4 py-2">{revenue.transactions}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </TabsContent>
 
-                  <TabsContent value="clicks">
-                    <div className="border rounded-lg">
-                      <table className="w-full">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left">Date</th>
-                            <th className="px-4 py-2 text-left">Advertiser</th>
-                            <th className="px-4 py-2 text-left">Clicks</th>
-                            <th className="px-4 py-2 text-left">Channel</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {/* Assuming 'clicks' is fetched elsewhere and available here */}
-                          {clicks?.map((click: any) => (
-                            <tr key={`${click.day}-${click.advertiser_id}`} className="border-t">
-                              <td className="px-4 py-2">
-                                {new Date(click.day).toLocaleDateString()}
-                              </td>
-                              <td className="px-4 py-2">{click.advertiser_name}</td>
-                              <td className="px-4 py-2">{click.clicks}</td>
-                              <td className="px-4 py-2">{click.channel_name}</td>
+                    <TabsContent value="clicks">
+                      <div className="border rounded-lg overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left">Date</th>
+                              <th className="px-4 py-2 text-left">Advertiser</th>
+                              <th className="px-4 py-2 text-left">Clicks</th>
+                              <th className="px-4 py-2 text-left">Channel</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </TabsContent>
-                </Tabs>
+                          </thead>
+                          <tbody>
+                            {clicks?.map((click: any) => (
+                              <tr key={`${click.day}-${click.advertiser_id}`} className="border-t">
+                                <td className="px-4 py-2">
+                                  {new Date(click.day).toLocaleDateString()}
+                                </td>
+                                <td className="px-4 py-2">{click.advertiser_name}</td>
+                                <td className="px-4 py-2">{click.clicks}</td>
+                                <td className="px-4 py-2">{click.channel_name}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
