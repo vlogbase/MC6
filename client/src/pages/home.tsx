@@ -235,6 +235,24 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
     });
   }
 
+  // Calculate summary statistics
+  const transactionStats = {
+    total: transactions?.length || 0,
+    totalAmount: transactions?.reduce((sum, t) => sum + parseFloat(t.price), 0) || 0,
+    pendingCount: transactions?.filter(t => t.status_id === 'pending').length || 0
+  };
+
+  const revenueStats = {
+    total: revenues?.reduce((sum, r) => sum + parseFloat(r.revenue), 0) || 0,
+    transactionCount: revenues?.reduce((sum, r) => sum + (r.transactions || 0), 0) || 0,
+    currency: revenues?.[0]?.currency || 'USD'
+  };
+
+  const clickStats = {
+    total: clicks?.reduce((sum, c) => sum + (c.clicks || 0), 0) || 0,
+    channels: [...new Set(clicks?.map(c => c.channel_name) || [])].length
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -435,6 +453,28 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                     </TabsList>
 
                     <TabsContent value="transactions">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <Card>
+                          <CardContent className="pt-6">
+                            <div className="text-2xl font-bold">{transactionStats.total}</div>
+                            <p className="text-sm text-muted-foreground">Total Transactions</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-6">
+                            <div className="text-2xl font-bold">
+                              {transactions?.[0]?.currency} {transactionStats.totalAmount.toFixed(2)}
+                            </div>
+                            <p className="text-sm text-muted-foreground">Total Transaction Value</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-6">
+                            <div className="text-2xl font-bold">{transactionStats.pendingCount}</div>
+                            <p className="text-sm text-muted-foreground">Pending Transactions</p>
+                          </CardContent>
+                        </Card>
+                      </div>
                       <div className="border rounded-lg overflow-x-auto">
                         <table className="w-full">
                           <thead className="bg-gray-50">
@@ -466,6 +506,32 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                     </TabsContent>
 
                     <TabsContent value="revenue">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <Card>
+                          <CardContent className="pt-6">
+                            <div className="text-2xl font-bold">
+                              {revenueStats.currency} {revenueStats.total.toFixed(2)}
+                            </div>
+                            <p className="text-sm text-muted-foreground">Total Revenue</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-6">
+                            <div className="text-2xl font-bold">{revenueStats.transactionCount}</div>
+                            <p className="text-sm text-muted-foreground">Total Transactions</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-6">
+                            <div className="text-2xl font-bold">
+                              {revenueStats.total > 0 && revenueStats.transactionCount > 0
+                                ? `${revenueStats.currency} ${(revenueStats.total / revenueStats.transactionCount).toFixed(2)}`
+                                : '-'}
+                            </div>
+                            <p className="text-sm text-muted-foreground">Average Revenue per Transaction</p>
+                          </CardContent>
+                        </Card>
+                      </div>
                       <div className="border rounded-lg overflow-x-auto">
                         <table className="w-full">
                           <thead className="bg-gray-50">
@@ -497,6 +563,20 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
                     </TabsContent>
 
                     <TabsContent value="clicks">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <Card>
+                          <CardContent className="pt-6">
+                            <div className="text-2xl font-bold">{clickStats.total}</div>
+                            <p className="text-sm text-muted-foreground">Total Clicks</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-6">
+                            <div className="text-2xl font-bold">{clickStats.channels}</div>
+                            <p className="text-sm text-muted-foreground">Active Channels</p>
+                          </CardContent>
+                        </Card>
+                      </div>
                       <div className="border rounded-lg overflow-x-auto">
                         <table className="w-full">
                           <thead className="bg-gray-50">
