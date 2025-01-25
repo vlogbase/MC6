@@ -406,40 +406,111 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
           <TabsContent value="stats">
             <Card>
               <CardHeader>
-                <CardTitle>Your Links</CardTitle>
+                <CardTitle>Performance Statistics</CardTitle>
                 <CardDescription>
-                  View your affiliate links and their performance
+                  View your affiliate performance metrics
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {isLoading ? (
-                  <div>Loading...</div>
-                ) : (
-                  <div className="border rounded-lg">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-2 text-left">Original URL</th>
-                          <th className="px-4 py-2 text-left">Rewritten URL</th>
-                          <th className="px-4 py-2 text-left">Source</th>
-                          <th className="px-4 py-2 text-left">Created</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {links?.map((link) => (
-                          <tr key={link.id} className="border-t">
-                            <td className="px-4 py-2">{link.originalUrl}</td>
-                            <td className="px-4 py-2">{link.rewrittenUrl}</td>
-                            <td className="px-4 py-2">{link.source}</td>
-                            <td className="px-4 py-2">
-                              {new Date(link.createdAt!).toLocaleDateString()}
-                            </td>
+                <Tabs defaultValue="transactions" className="space-y-4">
+                  <TabsList>
+                    <TabsTrigger value="transactions">Transactions</TabsTrigger>
+                    <TabsTrigger value="revenue">Revenue</TabsTrigger>
+                    <TabsTrigger value="clicks">Clicks</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="transactions">
+                    <div className="border rounded-lg">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left">Date</th>
+                            <th className="px-4 py-2 text-left">Advertiser</th>
+                            <th className="px-4 py-2 text-left">Order ID</th>
+                            <th className="px-4 py-2 text-left">Amount</th>
+                            <th className="px-4 py-2 text-left">Status</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        </thead>
+                        <tbody>
+                          {/* Assuming 'transactions' is fetched elsewhere and available here */}
+                          {transactions?.map((transaction: any) => (
+                            <tr key={transaction.id} className="border-t">
+                              <td className="px-4 py-2">
+                                {new Date(transaction.sold).toLocaleDateString()}
+                              </td>
+                              <td className="px-4 py-2">{transaction.advertiser_name}</td>
+                              <td className="px-4 py-2">{transaction.order_id}</td>
+                              <td className="px-4 py-2">
+                                {transaction.currency} {transaction.price}
+                              </td>
+                              <td className="px-4 py-2">{transaction.status_name}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="revenue">
+                    <div className="border rounded-lg">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left">Date</th>
+                            <th className="px-4 py-2 text-left">Advertiser</th>
+                            <th className="px-4 py-2 text-left">Revenue</th>
+                            <th className="px-4 py-2 text-left">Status</th>
+                            <th className="px-4 py-2 text-left">Transactions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {/* Assuming 'revenues' is fetched elsewhere and available here */}
+                          {revenues?.map((revenue: any) => (
+                            <tr key={`${revenue.day}-${revenue.advertiser_id}`} className="border-t">
+                              <td className="px-4 py-2">
+                                {new Date(revenue.day).toLocaleDateString()}
+                              </td>
+                              <td className="px-4 py-2">{revenue.advertiser_name}</td>
+                              <td className="px-4 py-2">
+                                {revenue.currency} {revenue.revenue}
+                              </td>
+                              <td className="px-4 py-2">{revenue.status_name}</td>
+                              <td className="px-4 py-2">{revenue.transactions}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="clicks">
+                    <div className="border rounded-lg">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left">Date</th>
+                            <th className="px-4 py-2 text-left">Advertiser</th>
+                            <th className="px-4 py-2 text-left">Clicks</th>
+                            <th className="px-4 py-2 text-left">Channel</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {/* Assuming 'clicks' is fetched elsewhere and available here */}
+                          {clicks?.map((click: any) => (
+                            <tr key={`${click.day}-${click.advertiser_id}`} className="border-t">
+                              <td className="px-4 py-2">
+                                {new Date(click.day).toLocaleDateString()}
+                              </td>
+                              <td className="px-4 py-2">{click.advertiser_name}</td>
+                              <td className="px-4 py-2">{click.clicks}</td>
+                              <td className="px-4 py-2">{click.channel_name}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </TabsContent>
+                </Tabs>
               </CardContent>
             </Card>
           </TabsContent>

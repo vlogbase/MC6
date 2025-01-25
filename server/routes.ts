@@ -76,6 +76,22 @@ async function getRewrittenUrl(originalUrl: string, userId: number, source: stri
   }
 }
 
+async function fetchStrackrStats(endpoint: string, params: Record<string, string>) {
+  try {
+    const response = await axios.get(`https://api.strackr.com/v3/${endpoint}`, {
+      params: {
+        api_id: process.env.STRACKR_API_ID,
+        api_key: process.env.STRACKR_API_KEY,
+        ...params
+      }
+    });
+    return response.data;
+  } catch (error: any) {
+    console.error(`Strackr ${endpoint} error:`, error.message);
+    throw error;
+  }
+}
+
 export function registerRoutes(app: Express): Server {
   // Setup OAuth and auth routes
   setupAuth(app);
@@ -100,6 +116,33 @@ export function registerRoutes(app: Express): Server {
       console.error("Rewrite error:", error);
       res.status(500).json({ 
         error: "Failed to rewrite URL",
+        message: error.message 
+      });
+    }
+  });
+
+  // Strackr Stats endpoints
+  app.get("/api/stats/:type", authenticateRequest, async (req, res) => {
+    try {
+      const { type } = req.params;
+      const { timeStart, timeEnd } = req.query;
+
+      if (!timeStart || !timeEnd) {
+        return res.status(400).json({ error: "Time range is required" });
+      }
+
+      const endpoint = `reports/${type}`;
+      const data = await fetchStrackrStats(endpoint, {
+        time_start: timeStart as string,
+        time_end: timeEnd as string,
+        time_type: 'checked'
+      });
+
+      res.json(data);
+    } catch (error: any) {
+      console.error(`Stats error for ${req.params.type}:`, error);
+      res.status(500).json({ 
+        error: `Failed to fetch ${req.params.type} stats`,
         message: error.message 
       });
     }
