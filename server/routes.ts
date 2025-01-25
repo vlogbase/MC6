@@ -204,4 +204,12 @@ export function registerRoutes(app: Express): Server {
         .where(eq(links.userId, userId))
         .orderBy(links.createdAt);
       return res.json(userLinks);
-    } catch (error
+    } catch (error) {
+      console.error("Error fetching links:", error);
+      return res.status(500).json({ error: "Failed to fetch links" });
+    }
+  });
+
+  const httpServer = createServer(app);
+  return httpServer;
+}
