@@ -10,6 +10,19 @@ import { db } from "@db";
 import { eq } from "drizzle-orm";
 
 const scryptAsync = promisify(scrypt);
+
+// OAuth Configuration
+const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || "affiliate-link-manager-client";
+const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || randomBytes(32).toString('hex');
+const OAUTH_SCOPES = ["rewrite"];
+
+// Store OAuth tokens
+const tokenStore = new Map<string, {
+  accessToken: string,
+  userId: number,
+  expiresAt: number
+}>();
+
 const crypto = {
   hash: async (password: string) => {
     const salt = randomBytes(16).toString("hex");
@@ -57,6 +70,63 @@ export function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  // OAuth endpoints
+  app.post("/api/auth", async (req, res) => {
+    const { client_id, client_secret } = req.body;
+
+    if (client_id !== OAUTH_CLIENT_ID || client_secret !== OAUTH_CLIENT_SECRET) {
+      return res.status(401).json({ error: "Invalid client credentials" });
+    }
+
+    if (!req.user) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    const accessToken = randomBytes(32).toString('hex');
+    tokenStore.set(accessToken, {
+      accessToken,
+      userId: req.user.id,
+      expiresAt: Date.now() + (60 * 60 * 1000) // 1 hour expiry
+    });
+
+    res.json({
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: 3600,
+      scope: OAUTH_SCOPES.join(" ")
+    });
+  });
+
+  app.post("/api/token", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Basic ')) {
+      return res.status(401).json({ error: "Missing authorization header" });
+    }
+
+    const [clientId, clientSecret] = Buffer.from(authHeader.slice(6), 'base64')
+      .toString()
+      .split(':');
+
+    if (clientId !== OAUTH_CLIENT_ID || clientSecret !== OAUTH_CLIENT_SECRET) {
+      return res.status(401).json({ error: "Invalid client credentials" });
+    }
+
+    const { grant_type, refresh_token } = req.body;
+    if (grant_type !== "refresh_token" || !refresh_token) {
+      return res.status(400).json({ error: "Invalid grant type or missing refresh token" });
+    }
+
+    // Validate refresh token and issue new access token
+    // For now, we'll just issue a new token
+    const accessToken = randomBytes(32).toString('hex');
+    res.json({
+      access_token: accessToken,
+      token_type: "Bearer",
+      expires_in: 3600,
+      scope: OAUTH_SCOPES.join(" ")
+    });
+  });
+
   passport.use(
     new LocalStrategy(async (username, password, done) => {
       try {
@@ -95,6 +165,18 @@ export function setupAuth(app: Express) {
     } catch (err) {
       done(err);
     }
+  });
+
+  // Export OAuth credentials for frontend use
+  app.get("/api/oauth-credentials", ensureAuthenticated, (req, res) => {
+    res.json({
+      client_id: OAUTH_CLIENT_ID,
+      client_secret: OAUTH_CLIENT_SECRET,
+      authorization_url: `${req.protocol}://${req.get('host')}/api/auth`,
+      token_url: `${req.protocol}://${req.get('host')}/api/token`,
+      scopes: OAUTH_SCOPES,
+      token_exchange_method: "basic_auth"
+    });
   });
 
   app.post("/api/register", async (req, res, next) => {

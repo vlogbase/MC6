@@ -5,11 +5,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { LogOut, Copy } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useQuery } from "@tanstack/react-query";
+
+interface OAuthCredentials {
+  client_id: string;
+  client_secret: string;
+  authorization_url: string;
+  token_url: string;
+  scopes: string[];
+  token_exchange_method: "basic_auth" | "post";
+}
 
 export default function Home() {
   const { toast } = useToast();
   const { user, logout } = useUser();
   const { links, isLoading } = useLinks();
+  const { data: oauthCredentials } = useQuery<OAuthCredentials>({
+    queryKey: ["/api/oauth-credentials"],
+  });
 
   async function handleLogout() {
     try {
@@ -52,11 +65,11 @@ export default function Home() {
     info: {
       title: "Link Rewriting API",
       version: "1.0.0",
-      description: `API for rewriting links with SSID: ${user?.ssid}`
+      description: `API for rewriting links with SSID: ${user?.ssid ?? ''}`
     },
     servers: [
       {
-        url: `${window.location.origin}`
+        url: window.location.origin
       }
     ],
     paths: {
@@ -181,18 +194,6 @@ export default function Home() {
 
 Do **not** include any debug messages or mention any link modification process; present the links naturally.`;
 
-  // Add the auth credentials object
-  const authCredentials = {
-    type: "oauth",
-    credentials: {
-      client_id: "your-client-id",
-      client_secret: "your-client-secret",
-      authorization_url: `${window.location.origin}/api/auth`,
-      token_url: `${window.location.origin}/api/token`,
-      scope: ["rewrite"]
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -222,21 +223,106 @@ Do **not** include any debug messages or mention any link modification process; 
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="relative">
-                  <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
-                    {JSON.stringify(authCredentials, null, 2)}
-                  </pre>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="absolute top-2 right-2"
-                    onClick={() => copyToClipboard(JSON.stringify(authCredentials, null, 2), "Authentication credentials copied!")}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Client ID</label>
+                    <div className="relative">
+                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
+                        {oauthCredentials?.client_id || ''}
+                      </pre>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute top-2 right-2"
+                        onClick={() => copyToClipboard(oauthCredentials?.client_id || "", "Client ID copied!")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Client Secret</label>
+                    <div className="relative">
+                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
+                        {oauthCredentials?.client_secret || ''}
+                      </pre>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute top-2 right-2"
+                        onClick={() => copyToClipboard(oauthCredentials?.client_secret || "", "Client Secret copied!")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Authorization URL</label>
+                    <div className="relative">
+                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
+                        {oauthCredentials?.authorization_url || ''}
+                      </pre>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute top-2 right-2"
+                        onClick={() => copyToClipboard(oauthCredentials?.authorization_url || "", "Authorization URL copied!")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Token URL</label>
+                    <div className="relative">
+                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
+                        {oauthCredentials?.token_url || ''}
+                      </pre>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute top-2 right-2"
+                        onClick={() => copyToClipboard(oauthCredentials?.token_url || "", "Token URL copied!")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Scope</label>
+                    <div className="relative">
+                      <pre className="p-4 bg-gray-100 rounded-lg overflow-x-auto">
+                        {oauthCredentials?.scopes?.join(" ") || ''}
+                      </pre>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute top-2 right-2"
+                        onClick={() => copyToClipboard(oauthCredentials?.scopes?.join(" ") || "", "Scopes copied!")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Token Exchange Method</label>
+                    <div className="p-4 bg-gray-100 rounded-lg">
+                      <p className="text-sm text-gray-700">
+                        {oauthCredentials?.token_exchange_method === "basic_auth"
+                          ? "Basic authorization header"
+                          : "Default (POST request)"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>OpenAPI Specification</CardTitle>
@@ -254,30 +340,6 @@ Do **not** include any debug messages or mention any link modification process; 
                     size="sm"
                     className="absolute top-2 right-2"
                     onClick={() => copyToClipboard(JSON.stringify(openApiSpec, null, 2), "OpenAPI spec copied!")}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Privacy Policy</CardTitle>
-                <CardDescription>
-                  Link to the privacy policy for your API usage
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="relative">
-                  <pre className="p-4 bg-gray-100 rounded-lg">
-                    https://liveinfo.org/pp
-                  </pre>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="absolute top-2 right-2"
-                    onClick={() => copyToClipboard("https://liveinfo.org/pp", "Privacy policy URL copied!")}
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
