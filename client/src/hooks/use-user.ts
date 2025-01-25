@@ -9,6 +9,27 @@ type RequestResult = {
   message: string;
 };
 
+async function fetchUser(): Promise<SelectUser | null> {
+  const response = await fetch('/api/user', {
+    credentials: 'include'
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      return null;
+    }
+
+    if (response.status >= 500) {
+      throw new Error(`${response.status}: ${response.statusText}`);
+    }
+
+    throw new Error(`${response.status}: ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  return data as SelectUser;  // Ensure proper typing of the response
+}
+
 async function handleRequest(
   url: string,
   method: string,
@@ -36,26 +57,6 @@ async function handleRequest(
   } catch (e: any) {
     return { ok: false, message: e.toString() };
   }
-}
-
-async function fetchUser(): Promise<SelectUser | null> {
-  const response = await fetch('/api/user', {
-    credentials: 'include'
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      return null;
-    }
-
-    if (response.status >= 500) {
-      throw new Error(`${response.status}: ${response.statusText}`);
-    }
-
-    throw new Error(`${response.status}: ${await response.text()}`);
-  }
-
-  return response.json();
 }
 
 export function useUser() {

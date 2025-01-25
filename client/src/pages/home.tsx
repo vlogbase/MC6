@@ -238,8 +238,8 @@ Important: The access token expires after 1 hour. If you receive a 401 error, ob
       <div className="max-w-6xl mx-auto space-y-8">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold">Welcome, {user?.username}</h1>
-            <p className="text-gray-600">Your SSID: {user?.ssid}</p>
+            <h1 className="text-3xl font-bold">Welcome, {user?.username || "Guest"}</h1>
+            <p className="text-gray-600">Your SSID: {user?.ssid || "Not available"}</p>
           </div>
           <Button onClick={handleLogout} variant="ghost">
             <LogOut className="mr-2 h-4 w-4" />
