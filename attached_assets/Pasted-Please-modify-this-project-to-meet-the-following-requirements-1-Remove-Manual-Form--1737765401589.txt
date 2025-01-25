@@ -1,0 +1,36 @@
+Please modify this project to meet the following requirements:
+
+1. **Remove Manual Form**  
+   - In `Home.tsx`, remove the “Create New Link” form. We no longer want a user to type in a URL for rewriting on the frontend.  
+   - Keep the “Your Links” table so that users can see links already rewritten.
+
+2. **New Rewrite Endpoint**  
+   - Create or update an endpoint at `POST /api/rewrite`.  
+   - The endpoint must:
+     - Require authentication (similar to your other routes).  
+     - Accept JSON in the body, e.g. `{ "url": "some url", "source": "some source" }`.  
+     - Incorporate the user’s SSID (from `req.user.ssid`) **and** the `source` param in the final affiliate link.  
+     - Call out to the existing Strackr (or affiliate) logic to rewrite the link, passing the SSID. For instance, if we’re making an API call to Strackr, we must pass the user’s SSID along with the original link.  
+     - Return a JSON response: `{ "rewrittenUrl": "..." }`.
+
+3. **Caching**  
+   - Implement a **cache** layer so that if the **same user** rewrites the **exact same** URL + source again, we return the previously-generated rewritten link immediately without repeating the external rewriting call.  
+   - You can store this cache in memory, or in the existing `links` table.  
+   - If you do an in-memory cache, use a suitable JavaScript Map or LRU approach. If you do a DB-based cache, you could store a row keyed by `(userId, originalUrl, source)`.  
+   - If the rewrite is found in the cache, respond with it. If not, call the affiliate rewriting logic, store in the cache, and return it.
+
+4. **Storing Rewritten Links**  
+   - Each time a new link is generated, store a row in the `links` table so the user can see it in their “Your Links” table.  
+   - The existing table likely has columns for `originalUrl`, `rewrittenUrl`, `source`, etc.  
+   - Make sure the final link also includes `ssid` in it.
+
+5. **OpenAPI Spec**  
+   - In `/api/openapi`, update the path for `/api/rewrite` to reflect these new parameters (`url`, `source`) in the request body.  
+   - GPT will POST to this path, so no references to a user typing a URL manually should remain.
+
+6. **Frontend Dashboard**  
+   - The user’s `Home.tsx` still has a table listing all the user’s rewritten links (fetched from your existing `GET /api/links`).  
+   - The new rewrite flow should happen only through `POST /api/rewrite` calls from GPT.  
+   - Remove or hide any leftover code from the old “create link” form.
+
+Please make these changes throughout the codebase, ensuring the rewriting endpoint passes the user’s SSID to Strackr (or the affiliate logic) and uses a caching mechanism so repeated calls for the same link are not re-sent to Strackr. 

@@ -3,48 +3,12 @@ import { useLinks } from "@/hooks/use-links";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { useForm } from "react-hook-form";
-import * as z from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { DataTable } from "@/components/ui/table";
-import { DownloadIcon, Link, LogOut } from "lucide-react";
-
-const linkFormSchema = z.object({
-  originalUrl: z.string().url(),
-  source: z.string().min(1),
-});
+import { DownloadIcon, LogOut } from "lucide-react";
 
 export default function Home() {
   const { toast } = useToast();
   const { user, logout } = useUser();
-  const { links, createLink, isLoading } = useLinks();
-
-  const form = useForm<z.infer<typeof linkFormSchema>>({
-    resolver: zodResolver(linkFormSchema),
-    defaultValues: {
-      originalUrl: "",
-      source: "",
-    },
-  });
-
-  async function onSubmit(values: z.infer<typeof linkFormSchema>) {
-    try {
-      await createLink(values);
-      form.reset();
-      toast({
-        title: "Success",
-        description: "Link created successfully",
-      });
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to create link",
-      });
-    }
-  }
+  const { links, isLoading } = useLinks();
 
   async function handleLogout() {
     try {
@@ -114,53 +78,9 @@ export default function Home() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Create New Link</CardTitle>
-            <CardDescription>
-              Enter a URL to create a new affiliate link
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="originalUrl"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>URL</FormLabel>
-                        <FormControl>
-                          <Input placeholder="https://..." {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="source"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Source</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. website, email" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                <Button type="submit">Create Link</Button>
-              </form>
-            </Form>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
             <CardTitle>Your Links</CardTitle>
             <CardDescription>
-              View and manage your affiliate links
+              View your affiliate links and their performance
             </CardDescription>
           </CardHeader>
           <CardContent>

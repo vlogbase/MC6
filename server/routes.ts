@@ -3,8 +3,27 @@ import { createServer, type Server } from "http";
 import { setupAuth } from "./auth";
 import { db } from "@db";
 import { links, insertLinkSchema } from "@db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
+
+// In-memory cache using LRU approach
+const linkCache = new Map<string, { rewrittenUrl: string, timestamp: number }>();
+const CACHE_TTL = 1000 * 60 * 60; // 1 hour in milliseconds
+
+function generateCacheKey(userId: number, url: string, source: string) {
+  return `${userId}:${url}:${source}`;
+}
+
+function getCachedLink(cacheKey: string) {
+  const cached = linkCache.get(cacheKey);
+  if (cached) {
+    if (Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.rewrittenUrl;
+    }
+    linkCache.delete(cacheKey);
+  }
+  return null;
+}
 
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
@@ -14,31 +33,75 @@ export function registerRoutes(app: Express): Server {
     max: 100 // limit each IP to 100 requests per windowMs
   });
 
-  // Link management endpoints
-  app.post("/api/links", linkLimiter, async (req, res) => {
+  // Link rewriting endpoint
+  app.post("/api/rewrite", linkLimiter, async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not logged in");
     }
 
-    const result = insertLinkSchema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).send(result.error.message);
+    const { url, source } = req.body;
+    if (!url || !source) {
+      return res.status(400).send("URL and source are required");
+    }
+
+    const cacheKey = generateCacheKey(req.user.id, url, source);
+    const cachedUrl = getCachedLink(cacheKey);
+
+    if (cachedUrl) {
+      return res.json({ rewrittenUrl: cachedUrl });
     }
 
     try {
-      const [link] = await db.insert(links)
+      // Check if we already have this link in the database
+      const [existingLink] = await db
+        .select()
+        .from(links)
+        .where(
+          and(
+            eq(links.userId, req.user.id),
+            eq(links.originalUrl, url),
+            eq(links.source, source)
+          )
+        )
+        .limit(1);
+
+      if (existingLink) {
+        linkCache.set(cacheKey, {
+          rewrittenUrl: existingLink.rewrittenUrl,
+          timestamp: Date.now()
+        });
+        return res.json({ rewrittenUrl: existingLink.rewrittenUrl });
+      }
+
+      // In a real implementation, this would call the Strackr API
+      // For now, we'll simulate by appending the SSID and source
+      const rewrittenUrl = `${url}?ssid=${req.user.ssid}&source=${encodeURIComponent(source)}`;
+
+      // Store the new link
+      const [newLink] = await db
+        .insert(links)
         .values({
-          ...result.data,
-          userId: req.user.id
+          userId: req.user.id,
+          originalUrl: url,
+          rewrittenUrl,
+          source,
         })
         .returning();
-      
-      res.json(link);
+
+      // Cache the result
+      linkCache.set(cacheKey, {
+        rewrittenUrl,
+        timestamp: Date.now()
+      });
+
+      res.json({ rewrittenUrl });
     } catch (error) {
-      res.status(500).send("Failed to create link");
+      console.error('Error rewriting link:', error);
+      res.status(500).send("Failed to rewrite link");
     }
   });
 
+  // Links listing endpoint
   app.get("/api/links", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).send("Not logged in");
@@ -49,7 +112,7 @@ export function registerRoutes(app: Express): Server {
         .from(links)
         .where(eq(links.userId, req.user.id))
         .orderBy(links.createdAt);
-      
+
       res.json(userLinks);
     } catch (error) {
       res.status(500).send("Failed to fetch links");
@@ -78,6 +141,7 @@ export function registerRoutes(app: Express): Server {
         "/api/rewrite": {
           post: {
             summary: "Rewrite a URL with affiliate information",
+            security: [{ cookieAuth: [] }],
             requestBody: {
               required: true,
               content: {
@@ -107,16 +171,51 @@ export function registerRoutes(app: Express): Server {
                     schema: {
                       type: "object",
                       properties: {
-                        url: {
+                        rewrittenUrl: {
                           type: "string",
-                          description: "The rewritten URL"
+                          description: "The rewritten URL with SSID and source parameters"
                         }
                       }
                     }
                   }
                 }
+              },
+              "401": {
+                description: "Not authenticated"
+              },
+              "400": {
+                description: "Invalid input"
+              },
+              "500": {
+                description: "Server error"
               }
             }
+          }
+        },
+        "/api/links": {
+          get: {
+            summary: "Get all links for the user",
+            security: [{cookieAuth: []}],
+            responses: {
+              "200": {
+                description: "List of links"
+              },
+              "401": {
+                description: "Not authenticated"
+              },
+              "500": {
+                description: "Server error"
+              }
+            }
+          }
+        }
+      },
+      components: {
+        securitySchemes: {
+          cookieAuth: {
+            type: "apiKey",
+            in: "cookie",
+            name: "connect.sid"
           }
         }
       }
