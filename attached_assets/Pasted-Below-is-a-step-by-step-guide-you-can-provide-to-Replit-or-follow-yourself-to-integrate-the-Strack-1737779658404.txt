@@ -1,0 +1,233 @@
+Below is a step-by-step guide you can provide to Replit (or follow yourself) to integrate the Strackr API for both URL rewriting and stats retrieval. The instructions include how to prompt you for your Strackr credentials, store them as Replit secrets, and then wire everything up so your app:
+
+Uses the Strackr Link Builder to rewrite links (unless cached).
+Fetches performance statistics from Strackr and displays them in the user’s “Stats” tab (filtered by the user’s SSID).
+1. Prompt for and Store Credentials as Replit Secrets
+Open the “Secrets” panel in your Replit project. (In Replit, you’ll see a “Lock” icon labeled “Secrets” on the left side, or you can go to the “Tools” panel and look for “Secrets.”)
+
+Add the following secrets. Replit will prompt you to enter each value:
+
+STRACKR_API_ID: Your Strackr api_id.
+STRACKR_API_KEY: Your Strackr api_key.
+Make sure they are typed exactly, e.g.
+
+STRACKR_API_ID=12345678
+STRACKR_API_KEY=ABCDEFGHIJKLMN
+Save the secrets. Replit will securely store them so your code can reference them as process.env.STRACKR_API_ID and process.env.STRACKR_API_KEY but they won’t appear in commits or logs.
+
+2. Update the “Rewrite” Logic to Call the Strackr Link Builder
+(A) Create or Modify Your /api/rewrite Route
+Currently, you have something like:
+
+js
+Copy
+Edit
+// Example snippet
+const rewrittenUrl = `${url}?ssid=${req.user.ssid}&source=${encodeURIComponent(source)}`;
+That is local logic. We want to replace it with a call to Strackr’s Link Builder endpoint (GET /tools/linkbuilder).
+
+Implementation Outline:
+
+Check the Cache first (just as you do now). If a (userId, originalUrl, source) is in cache, return the cached URL.
+
+If Not Cached:
+
+Make a GET request to:
+bash
+Copy
+Edit
+https://api.strackr.com/v3/tools/linkbuilder?api_id=YOUR_API_ID
+  &api_key=YOUR_API_KEY
+  &url=ENCODED_ORIGINAL_LINK
+Replace YOUR_API_ID with process.env.STRACKR_API_ID
+Replace YOUR_API_KEY with process.env.STRACKR_API_KEY
+URL-encode the original link in the url parameter.
+Parse the JSON response, then pick the first valid trackinglink from response.results[].advertisers[].connections[].links[].trackinglink.
+If you have multiple advertisers or connections, you might need logic to pick the right one. For simplicity, just pick the first link with a valid trackinglink.
+This returned trackinglink is effectively your “rewritten URL.”
+Optionally, you can tack on ssid=${req.user.ssid} and source=${source} as query parameters if you want them appended to the final link (some affiliates do so, some do not).
+Insert into your database or cache, associating (userId, originalUrl, source) → the new rewrittenUrl.
+Pseudo-code example:
+
+js
+Copy
+Edit
+import axios from 'axios';
+
+app.post("/api/rewrite", authenticateRequest, async (req, res) => {
+  try {
+    const { url, source } = req.body;
+    const userId = req.user.id;       // or req.oauthToken.userId
+    const userSsid = req.user.ssid;   // for the user’s unique ID
+
+    // 1. Check the cache first
+    const cached = findInCache({ userId, url, source });
+    if (cached) {
+      return res.json({ rewrittenUrl: cached });
+    }
+
+    // 2. Call Strackr’s Link Builder:
+    const response = await axios.get(
+      "https://api.strackr.com/v3/tools/linkbuilder",
+      {
+        params: {
+          api_id: process.env.STRACKR_API_ID,
+          api_key: process.env.STRACKR_API_KEY,
+          url
+        },
+      }
+    );
+
+    // 3. Parse the JSON to find a tracking link
+    const data = response.data;
+    // e.g. data.results[0].advertisers[0].connections[0].links[0].trackinglink
+    let trackingLink;
+    const [first] = data.results || [];
+    if (first && first.advertisers && first.advertisers.length > 0) {
+      const adv = first.advertisers[0];
+      if (adv.connections && adv.connections.length > 0) {
+        const conn = adv.connections[0];
+        if (conn.links && conn.links.length > 0) {
+          trackingLink = conn.links[0].trackinglink;
+        }
+      }
+    }
+
+    if (!trackingLink) {
+      return res.status(400).json({ error: "No tracking link found from Strackr" });
+    }
+
+    // 4. Optionally append ?ssid= & source=
+    // (Only if you want to preserve your own SSID or source param)
+    const finalUrl = new URL(trackingLink);
+    finalUrl.searchParams.set("ssid", userSsid);
+    finalUrl.searchParams.set("source", source);
+    const rewrittenUrl = finalUrl.toString();
+
+    // 5. Store in DB or memory
+    storeInCache({ userId, url, source }, rewrittenUrl);
+
+    // 6. Return it
+    return res.json({ rewrittenUrl });
+  } catch (err) {
+    console.error("Rewrite error:", err);
+    return res.status(500).json({ error: "Rewrite failed" });
+  }
+});
+(B) Remove the Old Hardcoded ssid=... Logic
+Anywhere you were previously just building the URL with ?ssid=..., remove that. Instead, let the call to Strackr happen to get the affiliate link, then optionally append your query params after the fact.
+
+3. Pull Strackr Stats to Show in the “Stats” Tab
+You mentioned wanting to see the user’s “click performance” or “transaction stats.” You can do this by calling, for example:
+
+GET /reports/clicks for raw daily clicks, or
+GET /statistics/clicks for aggregated “click” metrics,
+GET /reports/transactions or GET /statistics/transactions for transaction data,
+GET /reports/revenues or GET /statistics/revenues for revenue data, etc.
+Implementation Outline:
+
+Decide which Strackr endpoint you want. For example:
+GET https://api.strackr.com/v3/statistics/clicks?api_id=...&api_key=...&time_start=YYYY-MM-DD&time_end=YYYY-MM-DD&time_range=...
+
+Add a new server-side route — e.g. /api/stats:
+
+js
+Copy
+Edit
+app.get("/api/stats", authenticateRequest, async (req, res) => {
+  try {
+    // For example, the user’s date range or other filters
+    const timeStart = "2023-01-01";
+    const timeEnd = "2023-12-31";
+
+    const strackrResponse = await axios.get(
+      "https://api.strackr.com/v3/statistics/clicks",
+      {
+        params: {
+          api_id: process.env.STRACKR_API_ID,
+          api_key: process.env.STRACKR_API_KEY,
+          time_start: timeStart,
+          time_end: timeEnd,
+          time_range: "day",
+          // add any additional filters
+        },
+      }
+    );
+    res.json(strackrResponse.data);
+  } catch (err) {
+    console.error("Stats error", err);
+    res.status(500).json({ error: "Failed to fetch stats" });
+  }
+});
+From the React UI (in your “Stats” tab), fetch /api/stats:
+
+ts
+Copy
+Edit
+// In client side
+import { useQuery } from "@tanstack/react-query";
+
+export function useStrackrStats() {
+  return useQuery(["stats"], async () => {
+    const res = await fetch("/api/stats", {
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Stats fetch failed");
+    return res.json();
+  });
+}
+Display the returned JSON (clicks, transactions, etc.) in your stats table or charts.
+
+Note on Using SSID: If each user in your system has a unique Strackr account or “connection,” then you’d need separate api_id + api_key per user. If you just want global stats under your single Strackr account, you can do that.
+
+If you want stats filtered by a custom subID (like the user’s ssid), you might incorporate the customs[] param (wildcard searching). This is more advanced. But the gist is you pass customs=something to filter on that subID.
+
+4. Modify the “Stats” Tab in the Frontend
+In your existing Home.tsx or Stats page, you already have an area that displays user link data. Add a new UI piece to show Strackr stats:
+
+tsx
+Copy
+Edit
+import { useStrackrStats } from "@/hooks/use-strackr-stats";
+
+export default function StatsTab() {
+  const { data, isLoading, error } = useStrackrStats();
+
+  if (isLoading) return <div>Loading Strackr data...</div>;
+  if (error) return <div>Failed to load stats</div>;
+
+  // data is the JSON from Strackr
+  return (
+    <div>
+      <h2 className="text-xl font-bold">Affiliate Stats</h2>
+      <pre>{JSON.stringify(data, null, 2)}</pre>
+    </div>
+  );
+}
+(This is just an example. You can parse data.results and display the fields you need in a table or chart.)
+
+5. Confirm That Everything Works
+Confirm your secrets are set:
+
+process.env.STRACKR_API_ID returns your Replit secret ID.
+process.env.STRACKR_API_KEY returns the key.
+Test the “Rewrite” route with a new link.
+
+You should see a request in your server logs that calls out to https://api.strackr.com/v3/tools/linkbuilder?....
+Go to “Stats” in your UI:
+
+You should see real data from Strackr (or empty if you have no real traffic yet).
+If errors show in the console or logs, adjust your query or parameters.
+6. Summary of Replit Instructions
+Go to Secrets (the “Lock” icon).
+Add STRACKR_API_ID and STRACKR_API_KEY secrets.
+In your Node code, reference them like:
+js
+Copy
+Edit
+const apiId = process.env.STRACKR_API_ID;
+const apiKey = process.env.STRACKR_API_KEY;
+Update the /api/rewrite route to call GET /tools/linkbuilder, store the result, return the final link.
+Add a new route (e.g. /api/stats) that calls GET /statistics/... from Strackr, then returns the data.
+Update your React client to fetch /api/stats and display the data.
+That’s it! Replit will store your Strackr credentials as environment secrets, and your app will now rewrite links and fetch stats from Strackr securely.
