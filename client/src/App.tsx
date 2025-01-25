@@ -3,25 +3,14 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import NotFound from "@/pages/not-found";
-import AuthPage from "@/pages/auth-page";
 import Home from "@/pages/home";
+// Removed import { useUser } from "@/hooks/use-user";
+// Removed AuthPage import
 import { Loader2 } from "lucide-react";
-import { useUser } from "@/hooks/use-user";
 
 function Router() {
-  const { user, isLoading } = useUser();
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-border" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <AuthPage />;
-  }
+  // No user check – if you want a loading spinner, you could keep something minimal:
+  // e.g. a "Loading..." state, or simply remove all that logic.
 
   return (
     <Switch>
