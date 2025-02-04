@@ -261,22 +261,31 @@ export function setupAuth(app: Express) {
 
   app.post("/api/login", (req, res, next) => {
     passport.authenticate("local", (err: any, user: Express.User, info: IVerifyOptions) => {
-      if (err) return next(err);
+      if (err) {
+        console.error("Login error:", err);
+        return next(err);
+      }
       if (!user) {
-        return res.status(400).send(info?.message ?? "Login failed");
+        console.log("Login failed:", info?.message);
+        return res.status(400).json({ error: info?.message ?? "Login failed" });
       }
       req.logIn(user, (err) => {
-        if (err) return next(err);
+        if (err) {
+          console.error("Session setup error:", err);
+          return next(err);
+        }
 
         const accessToken = generateAccessToken(user);
         const refreshToken = generateRefreshToken(user);
 
+        console.log("Login successful for user:", user.username);
         return res.json({
           message: "Login successful",
           user: {
             id: user.id,
             username: user.username,
             ssid: user.ssid,
+            apiKey: user.apiKey,
             createdAt: user.createdAt,
           },
           accessToken,

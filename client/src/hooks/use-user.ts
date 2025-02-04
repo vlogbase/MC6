@@ -114,25 +114,34 @@ async function handleRequest(
   try {
     const response = await fetchWithToken(url, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (!response.ok) {
-      if (response.status >= 500) {
-        return { ok: false, message: response.statusText };
-      }
+    const data = await response.json();
 
-      const message = await response.text();
-      return { ok: false, message };
+    if (!response.ok) {
+      console.error("Auth error:", data);
+      return { 
+        ok: false, 
+        message: data.error || data.message || "Request failed" 
+      };
     }
 
-    const data = await response.json();
     if (data.accessToken && data.refreshToken) {
       setTokens(data.accessToken, data.refreshToken);
     }
-    return { ok: true, user: data.user, accessToken: data.accessToken, refreshToken: data.refreshToken };
+
+    return { 
+      ok: true, 
+      user: data.user, 
+      accessToken: data.accessToken, 
+      refreshToken: data.refreshToken 
+    };
   } catch (e: any) {
+    console.error("Auth request error:", e);
     return { ok: false, message: e.toString() };
   }
 }
