@@ -10,8 +10,15 @@ import { db } from "@db";
 import { eq } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { nanoid } from 'nanoid';
+import jwt from 'jsonwebtoken';
 
 const scryptAsync = promisify(scrypt);
+
+// JWT configuration
+const JWT_SECRET = process.env.JWT_SECRET || process.env.REPL_ID || "porygon-supremacy";
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || JWT_SECRET + "-refresh";
+const ACCESS_TOKEN_EXPIRY = '15m';
+const REFRESH_TOKEN_EXPIRY = '7d';
 
 /**
  * Minimal crypto helpers for local user password hashing
@@ -33,22 +40,71 @@ const crypto = {
 declare global {
   namespace Express {
     interface User extends SelectUser {}
+    interface Request {
+      token?: string;
+    }
+  }
+}
+
+// Token generation functions
+function generateAccessToken(user: Express.User) {
+  const payload = {
+    id: user.id,
+    username: user.username,
+    ssid: user.ssid,
+    type: 'access'
+  };
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRY });
+}
+
+function generateRefreshToken(user: Express.User) {
+  const payload = {
+    id: user.id,
+    type: 'refresh'
+  };
+  return jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRY });
+}
+
+// Token verification middleware
+export function verifyToken(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return next(); // Continue to session-based auth if no token
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    req.user = {
+      id: decoded.id,
+      username: decoded.username,
+      ssid: decoded.ssid
+    } as Express.User;
+    req.token = token;
+    next();
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      return res.status(401).json({ error: "Token expired" });
+    }
+    next(); // Continue to session-based auth if token is invalid
   }
 }
 
 /**
  * authenticateRequest
  * Middleware to ensure user is logged in for dashboard access
+ * Supports both JWT and session-based authentication
  */
 export function authenticateRequest(req: Request, res: Response, next: NextFunction) {
-  if (req.isAuthenticated()) {
+  if (req.user) {
     return next();
   }
   return res.status(401).json({ error: "Authentication required" });
 }
 
 export function setupAuth(app: Express) {
-  // Rate limiting for login endpoints
+  // Rate limiting for auth endpoints
   app.set("trust proxy", 1);
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -59,7 +115,7 @@ export function setupAuth(app: Express) {
   // Basic session setup for dashboard access
   const MemoryStore = createMemoryStore(session);
   const sessionSettings: session.SessionOptions = {
-    secret: process.env.REPL_ID || "porygon-supremacy",
+    secret: JWT_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {},
@@ -74,6 +130,9 @@ export function setupAuth(app: Express) {
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
+
+  // Add token verification before passport middleware
+  app.use(verifyToken);
 
   // Local strategy setup
   passport.use(
@@ -111,6 +170,40 @@ export function setupAuth(app: Express) {
     }
   });
 
+  // Token refresh endpoint
+  app.post("/api/refresh-token", async (req, res) => {
+    const refreshToken = req.body.refreshToken;
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: "Refresh token required" });
+    }
+
+    try {
+      const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as any;
+      if (decoded.type !== 'refresh') {
+        return res.status(400).json({ error: "Invalid token type" });
+      }
+
+      const [user] = await db.select().from(users).where(eq(users.id, decoded.id)).limit(1);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const accessToken = generateAccessToken(user);
+      const newRefreshToken = generateRefreshToken(user);
+
+      res.json({
+        accessToken,
+        refreshToken: newRefreshToken,
+      });
+    } catch (err) {
+      if (err instanceof jwt.TokenExpiredError) {
+        return res.status(401).json({ error: "Refresh token expired" });
+      }
+      return res.status(400).json({ error: "Invalid refresh token" });
+    }
+  });
+
   app.post("/api/register", async (req, res, next) => {
     try {
       const result = insertUserSchema.safeParse(req.body);
@@ -143,6 +236,9 @@ export function setupAuth(app: Express) {
         })
         .returning();
 
+      const accessToken = generateAccessToken(newUser);
+      const refreshToken = generateRefreshToken(newUser);
+
       req.login(newUser, (err) => {
         if (err) return next(err);
         res.json({
@@ -154,6 +250,8 @@ export function setupAuth(app: Express) {
             apiKey: newUser.apiKey,
             createdAt: newUser.createdAt,
           },
+          accessToken,
+          refreshToken,
         });
       });
     } catch (error) {
@@ -169,6 +267,10 @@ export function setupAuth(app: Express) {
       }
       req.logIn(user, (err) => {
         if (err) return next(err);
+
+        const accessToken = generateAccessToken(user);
+        const refreshToken = generateRefreshToken(user);
+
         return res.json({
           message: "Login successful",
           user: {
@@ -177,6 +279,8 @@ export function setupAuth(app: Express) {
             ssid: user.ssid,
             createdAt: user.createdAt,
           },
+          accessToken,
+          refreshToken,
         });
       });
     })(req, res, next);
@@ -201,10 +305,7 @@ export function setupAuth(app: Express) {
     });
   });
 
-  app.get("/api/user", (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
+  app.get("/api/user", authenticateRequest, (req, res) => {
     return res.json({
       id: req.user!.id,
       username: req.user!.username,

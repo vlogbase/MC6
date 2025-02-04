@@ -1,0 +1,44 @@
+Prompt: Implement Robust JWT-Based Token Handling in /server/auth.ts
+
+Instruction:
+
+Create a New Token Endpoint:
+In the file /server/auth.ts, create (or modify) an endpoint at /api/token that handles token generation. This endpoint should:
+
+Accept user credentials (or client credentials) in the request (e.g., username and password for local authentication).
+Validate the credentials against your user database (using the existing local strategy if possible).
+Generate a JWT Access Token:
+Upon successful authentication, generate a JWT (JSON Web Token) that includes user details (e.g., user ID, username, etc.) and an expiration time (e.g., 1 hour). Use a secret stored in an environment variable (e.g., JWT_SECRET) for signing.
+
+Generate a Refresh Token:
+Also generate a refresh token (this can be a secure random string or another JWT with a longer expiry). Store the refresh token in a temporary in‑memory store (or your current tokenStore) along with its expiry time. (Note: For production, this should be stored persistently, but for now an in‑memory store is acceptable.)
+
+Implement a Token Refresh Endpoint:
+Create an endpoint at /api/token/refresh that accepts a refresh token. It should verify the refresh token (by looking it up in the tokenStore) and, if valid, generate a new access token (and optionally a new refresh token) and return them.
+
+Replace Old Minimal Implementation:
+Remove the previous hard‑coded token logic that ties tokens to a hard‑coded userId (1).
+Update any middleware that currently uses that minimal token logic so that it now verifies the JWT access token. You may use a library such as jsonwebtoken for both signing and verifying tokens.
+
+Add Detailed Inline Comments:
+Throughout the new implementation, add inline comments that explain:
+
+That this JWT-based token system is a simplified version for development purposes.
+In production, you should implement additional security features such as persistent storage of refresh tokens, proper error handling, token revocation mechanisms, and secure handling of secrets.
+How the token expiry and refresh flow works.
+Expected Outcome:
+
+The /api/token endpoint returns a JSON response with an accessToken (JWT) and a refreshToken.
+The /api/token/refresh endpoint allows a client to exchange a valid refresh token for a new access token.
+The authentication middleware is updated to validate the JWT access token.
+Inline comments explain the implementation and note recommendations for production use.
+How to Test:
+
+Start the server and issue a POST request to /api/token with valid credentials.
+Verify that you receive an accessToken and refreshToken.
+
+Wait until the access token expires (or simulate expiry), then send a request to /api/token/refresh with the refresh token.
+Verify that a new access token is returned.
+
+Test that protected endpoints (which rely on the new JWT-based middleware) only allow requests with a valid access token.
+
