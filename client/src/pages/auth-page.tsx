@@ -8,18 +8,22 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Loader2 } from "lucide-react";
 
 const formSchema = z.object({
-  username: z.string().min(3).max(50),
-  password: z.string().min(6),
+  username: z.string().min(3, "Username must be at least 3 characters").max(50),
+  password: z.string().min(6, "Password must be at least 6 characters"),
 });
+
+type FormData = z.infer<typeof formSchema>;
 
 export default function AuthPage() {
   const { toast } = useToast();
   const { login, register } = useUser();
   const [isLogin, setIsLogin] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const form = useForm<z.infer<typeof formSchema>>({
+  const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       username: "",
@@ -27,13 +31,19 @@ export default function AuthPage() {
     },
   });
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
+  async function onSubmit(values: FormData) {
     try {
+      console.log(`Attempting to ${isLogin ? 'login' : 'register'} with username:`, values.username);
+      setIsLoading(true);
+
       const result = await (isLogin ? login(values) : register(values));
+      console.log(`Auth ${isLogin ? 'login' : 'register'} result:`, result);
+
       if (!result.ok) {
+        console.error(`${isLogin ? 'Login' : 'Registration'} failed:`, result.message);
         toast({
           variant: "destructive",
-          title: "Error",
+          title: `${isLogin ? 'Login' : 'Registration'} failed`,
           description: result.message,
         });
         return;
@@ -44,11 +54,14 @@ export default function AuthPage() {
         description: isLogin ? "Logged in successfully" : "Registered successfully",
       });
     } catch (error) {
+      console.error(`${isLogin ? 'Login' : 'Registration'} error:`, error);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "An unexpected error occurred",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
       });
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -73,7 +86,7 @@ export default function AuthPage() {
                   <FormItem>
                     <FormLabel>Username</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} disabled={isLoading} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -86,21 +99,29 @@ export default function AuthPage() {
                   <FormItem>
                     <FormLabel>Password</FormLabel>
                     <FormControl>
-                      <Input type="password" {...field} />
+                      <Input type="password" {...field} disabled={isLoading} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
               <div className="flex flex-col gap-2">
-                <Button type="submit" className="w-full">
-                  {isLogin ? "Login" : "Register"}
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {isLogin ? "Logging in..." : "Registering..."}
+                    </>
+                  ) : (
+                    isLogin ? "Login" : "Register"
+                  )}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={() => setIsLogin(!isLogin)}
                   className="w-full"
+                  disabled={isLoading}
                 >
                   {isLogin
                     ? "Don't have an account? Register"
