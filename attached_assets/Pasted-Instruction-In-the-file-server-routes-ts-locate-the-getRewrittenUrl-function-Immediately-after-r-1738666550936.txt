@@ -1,0 +1,35 @@
+Instruction:
+In the file /server/routes.ts, locate the getRewrittenUrl function. Immediately after receiving the Strackr response (i.e. after the line const data = resp.data;), add a check to ensure that the returned JSON has the expected structure. For example, insert code similar to the following:
+
+ts
+Copy
+if (
+  !data.results ||
+  !Array.isArray(data.results) ||
+  data.results.length === 0 ||
+  !data.results[0].advertisers ||
+  data.results[0].advertisers.length === 0 ||
+  !data.results[0].advertisers[0].connections ||
+  data.results[0].advertisers[0].connections.length === 0 ||
+  !data.results[0].advertisers[0].connections[0].links ||
+  data.results[0].advertisers[0].connections[0].links.length === 0
+) {
+  console.error("Strackr API response:", JSON.stringify(data, null, 2));
+  throw new Error("No valid tracking link found from Strackr – full response: " + JSON.stringify(data));
+}
+Then, remove or adjust any existing logic that attempts to extract the tracking link without performing this validation. Make sure that if the expected data is missing, the function throws an error so that the calling endpoint (the POST /api/rewrite endpoint) returns a 500 error with a clear message.
+
+Expected Outcome:
+
+When Strackr returns a response that does not include the expected structure, the function logs the full JSON response and throws an error with a descriptive message.
+The rewrite endpoint responds with a 500 status code and a clear error message when the API response is malformed.
+How to Test:
+
+Use a tool such as curl or Postman to send a POST request to /api/rewrite with a payload like:
+json
+Copy
+{ "url": "https://example.com", "source": "chatbot" }
+and include a valid API key in the X-API-KEY header.
+Temporarily simulate an error—either by modifying one of the key names in your check or by using an invalid API key so that the Strackr response is treated as malformed.
+Verify that the server logs display the full JSON response from Strackr.
+Check that the HTTP response has a status code of 500 and includes the descriptive error message you specified.

@@ -16,6 +16,12 @@ const urlCache = new Map<
 >();
 const CACHE_TTL = 3600000; // 1 hour in ms
 
+/**
+ * getRewrittenUrl:
+ * 1. Checks if the link is in the cache and still valid.
+ * 2. If not, calls Strackr’s link builder endpoint, including a custom user‑agent header.
+ * 3. Returns the base tracking link.
+ */
 async function getRewrittenUrl(
   originalUrl: string,
   userId: number,
@@ -34,6 +40,10 @@ async function getRewrittenUrl(
         api_id: process.env.STRACKR_API_ID,
         api_key: process.env.STRACKR_API_KEY,
         url: originalUrl,
+      },
+      headers: {
+        // Identify the request as coming from your app.
+        "User-Agent": "MonetizeChatbots/1.0",
       },
     });
     const data = resp.data;
@@ -99,7 +109,7 @@ export function registerRoutes(app: Express): Server {
     try {
       const baseLink = await getRewrittenUrl(url, user.id, source);
 
-      // Append ssid and source parameters
+      // Append ssid and source parameters to the base tracking link
       const finalUrl = new URL(baseLink);
       finalUrl.searchParams.set("ssid", user.ssid);
       finalUrl.searchParams.set("source", source);
