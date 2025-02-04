@@ -123,11 +123,13 @@ async function handleRequest(
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Auth error:", data);
-      return { 
-        ok: false, 
-        message: data.error || data.message || "Request failed" 
-      };
+      // Extract error message safely
+      const errorMessage = typeof data.error === 'string' 
+        ? data.error 
+        : (data.error?.message || data.message || "An unexpected error occurred");
+
+      console.error("Auth error:", { url, status: response.status, error: errorMessage });
+      return { ok: false, message: errorMessage };
     }
 
     if (data.accessToken && data.refreshToken) {
@@ -141,8 +143,9 @@ async function handleRequest(
       refreshToken: data.refreshToken 
     };
   } catch (e: any) {
-    console.error("Auth request error:", e);
-    return { ok: false, message: e.toString() };
+    const errorMessage = e?.message || "Failed to complete request";
+    console.error("Auth request error:", errorMessage);
+    return { ok: false, message: errorMessage };
   }
 }
 
@@ -165,6 +168,12 @@ export function useUser() {
         toast({
           title: "Success",
           description: "Successfully logged in",
+        });
+      } else if (!result.ok) {
+        toast({
+          variant: "destructive",
+          title: "Login failed",
+          description: result.message,
         });
       }
     },
@@ -190,6 +199,12 @@ export function useUser() {
         toast({
           title: "Success",
           description: "Successfully registered",
+        });
+      } else if (!result.ok) {
+        toast({
+          variant: "destructive",
+          title: "Registration failed",
+          description: result.message,
         });
       }
     },
