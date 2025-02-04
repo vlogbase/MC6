@@ -47,18 +47,28 @@ async function getRewrittenUrl(
       },
     });
     const data = resp.data;
-    let trackingLink: string | undefined;
-    const [first] = data.results || [];
-    if (first?.advertisers?.length) {
-      const adv = first.advertisers[0];
-      if (adv.connections?.length) {
-        const conn = adv.connections[0];
-        if (conn.links?.length) {
-          trackingLink = conn.links[0].trackinglink;
-        }
-      }
+
+    // Add validation checks for the API response structure
+    if (
+      !data.results ||
+      !Array.isArray(data.results) ||
+      data.results.length === 0 ||
+      !data.results[0].advertisers ||
+      data.results[0].advertisers.length === 0 ||
+      !data.results[0].advertisers[0].connections ||
+      data.results[0].advertisers[0].connections.length === 0 ||
+      !data.results[0].advertisers[0].connections[0].links ||
+      data.results[0].advertisers[0].connections[0].links.length === 0
+    ) {
+      console.error("Strackr API response:", JSON.stringify(data, null, 2));
+      throw new Error("No valid tracking link found from Strackr – full response: " + JSON.stringify(data));
     }
-    if (!trackingLink) throw new Error("No tracking link found from Strackr");
+
+    // Extract tracking link after validation
+    const trackingLink = data.results[0].advertisers[0].connections[0].links[0].trackinglink;
+    if (!trackingLink) {
+      throw new Error("Tracking link is empty or undefined");
+    }
 
     // Store base tracking link in cache
     urlCache.set(cacheKey, { rewrittenUrl: trackingLink, timestamp: Date.now() });
