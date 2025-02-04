@@ -5,36 +5,88 @@ import { db } from "@db";
 import { links, users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { setupAuth, authenticateRequest } from "./auth";
+import { createClient } from 'redis';
 
-// In-memory cache for rewriting
-const urlCache = new Map<
-  string,
-  {
-    rewrittenUrl: string;
-    timestamp: number;
+// Redis client setup for production caching
+const redisClient = createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379',
+  socket: {
+    reconnectStrategy: (retries) => {
+      // Exponential backoff with max delay of 10 seconds
+      const delay = Math.min(Math.pow(2, retries) * 100, 10000);
+      console.log(`Redis reconnecting in ${delay}ms... (attempt ${retries + 1})`);
+      return delay;
+    },
+    connectTimeout: 10000, // 10 seconds
+    keepAlive: 1000, // Send keepalive packet every 1000ms
+    noDelay: true, // Disable Nagle's algorithm
+    tls: process.env.REDIS_URL?.startsWith('rediss://') ? {} : undefined
   }
->();
-const CACHE_TTL = 3600000; // 1 hour in ms
+});
+
+// Connect to Redis and handle connection errors
+redisClient.connect().catch(err => {
+  console.error('Redis connection error:', err);
+  if (process.env.REDIS_URL) {
+    console.log('Redis URL format (for debugging):', process.env.REDIS_URL.replace(/\/\/.*@/, '//<credentials>@'));
+  } else {
+    console.log('No REDIS_URL provided, falling back to localhost');
+  }
+});
+
+redisClient.on('error', err => {
+  console.error('Redis error:', err);
+});
+
+redisClient.on('connect', () => {
+  console.log('Successfully connected to Redis');
+});
+
+redisClient.on('reconnecting', () => {
+  console.log('Redis reconnecting...');
+});
+
+redisClient.on('ready', () => {
+  console.log('Redis client is ready');
+});
+
+const CACHE_TTL = 3600; // 1 hour in seconds
 
 /**
  * getRewrittenUrl:
- * 1. Checks if the link is in the cache and still valid.
- * 2. If not, calls Strackr’s link builder endpoint, including a custom user‑agent header.
- * 3. Returns the base tracking link.
+ * 1. Checks Redis cache for existing rewritten URL
+ * 2. If not found, calls Strackr's link builder endpoint
+ * 3. Caches successful responses in Redis for future use
+ * 4. Includes fallback behavior if Redis is unavailable
  */
 async function getRewrittenUrl(
   originalUrl: string,
   userId: number,
   source: string
 ): Promise<string> {
-  const cacheKey = `${userId}:${originalUrl}:${source}`;
-  const cached = urlCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.rewrittenUrl;
+  const cacheKey = `url:${userId}:${originalUrl}:${source}`;
+
+  try {
+    // Check if Redis is connected before attempting operations
+    if (!redisClient.isOpen) {
+      console.warn('Redis not connected - bypassing cache');
+    } else {
+      // Try to get from Redis cache first
+      const cachedUrl = await redisClient.get(cacheKey);
+      if (cachedUrl) {
+        console.log('Cache hit for:', cacheKey);
+        return cachedUrl;
+      }
+      console.log('Cache miss for:', cacheKey);
+    }
+  } catch (cacheError) {
+    // Log Redis errors but continue with API call
+    console.error('Redis cache error:', cacheError);
   }
 
-  // Not in cache => call Strackr
+  // Not in cache or Redis error => call Strackr
   try {
+    console.log('Fetching from Strackr API for:', originalUrl);
     const resp = await axios.get("https://api.strackr.com/v3/tools/linkbuilder", {
       params: {
         api_id: process.env.STRACKR_API_ID,
@@ -42,13 +94,12 @@ async function getRewrittenUrl(
         url: originalUrl,
       },
       headers: {
-        // Identify the request as coming from your app.
         "User-Agent": "MonetizeChatbots/1.0",
       },
     });
     const data = resp.data;
 
-    // Add validation checks for the API response structure
+    // Validate API response structure
     if (
       !data.results ||
       !Array.isArray(data.results) ||
@@ -64,14 +115,21 @@ async function getRewrittenUrl(
       throw new Error("No valid tracking link found from Strackr – full response: " + JSON.stringify(data));
     }
 
-    // Extract tracking link after validation
     const trackingLink = data.results[0].advertisers[0].connections[0].links[0].trackinglink;
     if (!trackingLink) {
       throw new Error("Tracking link is empty or undefined");
     }
 
-    // Store base tracking link in cache
-    urlCache.set(cacheKey, { rewrittenUrl: trackingLink, timestamp: Date.now() });
+    try {
+      if (redisClient.isOpen) {
+        // Store in Redis cache with TTL
+        await redisClient.setEx(cacheKey, CACHE_TTL, trackingLink);
+        console.log('Cached new tracking link for:', cacheKey);
+      }
+    } catch (cacheError) {
+      // Log Redis errors but don't fail the request
+      console.error('Redis cache set error:', cacheError);
+    }
 
     return trackingLink;
   } catch (error: any) {

@@ -1,0 +1,38 @@
+In the file /server/routes.ts, please update the caching mechanism for the getRewrittenUrl function to use Redis instead of an in‑memory JavaScript Map. Here are the requirements:
+
+Set Up Redis Client:
+Install and import a Redis client library (for example, the official redis package).
+Connect to Redis using a connection string from an environment variable (e.g., process.env.REDIS_URL).
+Replace In‑Memory Cache:
+Remove or comment out the current urlCache in‑memory map.
+In the getRewrittenUrl function, before calling the external API, check Redis to see if a cached value exists for the key composed of ${userId}:${originalUrl}:${source}.
+If the cached value exists and is not expired, return it immediately.
+If not, call the Strackr API, extract the tracking link, and then store it in Redis with a TTL (for example, 1 hour).
+Error Handling:
+Ensure that any errors connecting to Redis or performing cache operations do not prevent the app from attempting to retrieve the tracking link from Strackr.
+Documentation:
+Add inline comments explaining that this Redis cache implementation is intended for production use, and that if a developer is using a different environment or scaling out the app, they should adjust the Redis configuration accordingly.
+Once updated, please verify that calling the /api/rewrite endpoint uses the Redis cache to store and retrieve rewritten URLs.
+
+Analysis (after browsing relevant documentation):
+I checked the latest documentation on the official redis package (and Replit community guides for setting up Redis via Nix), and found that using Redis with Node.js typically involves code similar to:
+
+typescript
+Copy
+import { createClient } from 'redis';
+
+const redisClient = createClient({
+  url: process.env.REDIS_URL,
+});
+redisClient.connect().catch(console.error);
+
+// Example usage in getRewrittenUrl:
+const cacheKey = `${userId}:${originalUrl}:${source}`;
+const cachedValue = await redisClient.get(cacheKey);
+if (cachedValue) {
+  return cachedValue;
+}
+
+// After fetching from Strackr:
+await redisClient.setEx(cacheKey, 3600, trackingLink);
+This prompt gives clear instructions on replacing the in‑memory cache with Redis, including error handling and configuration steps. On Replit, if you plan to use your development environment as production, you can configure Redis via Replit’s Nix or use Replit’s native key‑value store as a lightweight substitute if advanced features aren’t needed.
