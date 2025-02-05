@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 import { useToast } from "@/hooks/use-toast";
 import { auth, googleProvider } from '@/lib/firebase';
 import { 
@@ -44,6 +44,8 @@ async function handleFirebaseError(error: any): Promise<string> {
       return 'Invalid email or password';
     case 'auth/popup-closed-by-user':
       return 'Sign in was cancelled';
+    case 'auth/unauthorized-domain':
+      return 'This domain is not authorized for Google sign-in. Please contact the administrator.';
     default:
       return error.message || 'An unexpected error occurred';
   }
@@ -59,90 +61,88 @@ function convertFirebaseUser(fbUser: FirebaseUser): AuthUser {
 }
 
 export function useUser() {
-  const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  // Listen to auth state changes
-  const { data: user, error, isLoading } = useQuery<AuthUser | null>({
-    queryKey: ['auth-user'],
-    queryFn: () => 
-      new Promise((resolve) => {
-        const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
-          unsubscribe();
-          resolve(fbUser ? convertFirebaseUser(fbUser) : null);
-        });
-      }),
-    staleTime: Infinity,
-  });
-
-  // Google Sign In
-  const googleSignInMutation = useMutation({
-    mutationFn: async () => {
-      try {
-        const result = await signInWithPopup(auth, googleProvider);
-        return { ok: true, user: convertFirebaseUser(result.user) } as RequestResult;
-      } catch (error: any) {
-        const errorMessage = await handleFirebaseError(error);
-        return { ok: false, message: errorMessage } as RequestResult;
+  // Set up the Firebase auth state listener
+  useEffect(() => {
+    console.log('Setting up Firebase auth state listener');
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (firebaseUser) => {
+        setIsLoading(false);
+        if (firebaseUser) {
+          console.log('User signed in:', firebaseUser.email);
+          setUser(convertFirebaseUser(firebaseUser));
+        } else {
+          console.log('User signed out');
+          setUser(null);
+        }
+      },
+      (error) => {
+        console.error('Auth state change error:', error);
+        setError(error as Error);
+        setIsLoading(false);
       }
-    }
-  });
+    );
+
+    // Cleanup subscription
+    return () => unsubscribe();
+  }, []);
 
   // Email/Password Login
-  const loginMutation = useMutation({
-    mutationFn: async ({ email, password }: { email: string; password: string }) => {
-      try {
-        const result = await signInWithEmailAndPassword(auth, email, password);
-        return { ok: true, user: convertFirebaseUser(result.user) } as RequestResult;
-      } catch (error: any) {
-        const errorMessage = await handleFirebaseError(error);
-        return { ok: false, message: errorMessage } as RequestResult;
-      }
+  const login = async ({ email, password }: { email: string; password: string }): Promise<RequestResult> => {
+    try {
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      return { ok: true, user: convertFirebaseUser(result.user) };
+    } catch (error: any) {
+      const errorMessage = await handleFirebaseError(error);
+      return { ok: false, message: errorMessage };
     }
-  });
+  };
 
   // Email/Password Registration
-  const registerMutation = useMutation({
-    mutationFn: async ({ email, password }: { email: string; password: string }) => {
-      try {
-        const result = await createUserWithEmailAndPassword(auth, email, password);
-        return { ok: true, user: convertFirebaseUser(result.user) } as RequestResult;
-      } catch (error: any) {
-        const errorMessage = await handleFirebaseError(error);
-        return { ok: false, message: errorMessage } as RequestResult;
-      }
+  const register = async ({ email, password }: { email: string; password: string }): Promise<RequestResult> => {
+    try {
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      return { ok: true, user: convertFirebaseUser(result.user) };
+    } catch (error: any) {
+      const errorMessage = await handleFirebaseError(error);
+      return { ok: false, message: errorMessage };
     }
-  });
+  };
+
+  // Google Sign In
+  const googleSignIn = async (): Promise<RequestResult> => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      return { ok: true, user: convertFirebaseUser(result.user) };
+    } catch (error: any) {
+      const errorMessage = await handleFirebaseError(error);
+      return { ok: false, message: errorMessage };
+    }
+  };
 
   // Logout
-  const logoutMutation = useMutation({
-    mutationFn: async () => {
-      try {
-        await signOut(auth);
-        return { ok: true } as RequestResult;
-      } catch (error: any) {
-        const errorMessage = await handleFirebaseError(error);
-        return { ok: false, message: errorMessage } as RequestResult;
-      }
-    },
-    onSuccess: (result) => {
-      if (result.ok) {
-        queryClient.setQueryData(['auth-user'], null);
-        toast({
-          title: "Success",
-          description: "Successfully logged out",
-        });
-      }
+  const logout = async (): Promise<RequestResult> => {
+    try {
+      await signOut(auth);
+      return { ok: true };
+    } catch (error: any) {
+      const errorMessage = await handleFirebaseError(error);
+      return { ok: false, message: errorMessage };
     }
-  });
+  };
 
   return {
     user,
     isLoading,
     error,
-    login: loginMutation.mutateAsync,
-    logout: logoutMutation.mutateAsync,
-    register: registerMutation.mutateAsync,
-    googleSignIn: googleSignInMutation.mutateAsync
+    login,
+    logout,
+    register,
+    googleSignIn
   };
 }
