@@ -1,0 +1,93 @@
+Based on the information provided, the “failed to sync user data” error usually indicates that when your client tries to synchronize a Firebase‐authenticated user with your database (by calling a POST to /api/sync-firebase-user), it isn’t getting the expected response. In reviewing your code, it appears that while your client (in use-user.ts) is calling that endpoint, there is no corresponding route defined in your server code.
+
+Below are some steps to help you resolve this issue:
+
+Implement the Sync Endpoint on the Server
+Your client sends a POST request with a JSON body containing an idToken to /api/sync-firebase-user. This endpoint should:
+
+Use your Firebase Admin SDK (initialized with your new service account JSON) to verify the ID token (using, for example, admin.auth().verifyIdToken(idToken)).
+Check your database (e.g., the users table) for a user with the matching Firebase UID (or email).
+If the user is not found (or if the user record is missing required fields like an SSID), create a new user record using your existing logic (for example, generate an SSID with nanoid(12)).
+Return the user data (at minimum including properties such as id and ssid) as JSON.
+Verify Firebase Admin Initialization
+Double-check that you have updated your Firebase Admin initialization code to use the new base64‑encoded service account JSON. Make sure the environment variable (for example, FIREBASE_SERVICE_ACCOUNT_JSON) is set correctly in your Replit secrets and that your code parses it (e.g., using JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)).
+
+Add Detailed Logging
+In your new endpoint, add console logging so you can see:
+
+That the endpoint is being reached.
+The result of admin.auth().verifyIdToken().
+The database query result (whether an existing user is found or a new one is created).
+Restart Your Server and Test Again
+Once you’ve implemented /api/sync-firebase-user, restart your server and test the sign-in process. Check your server logs for the output from your logging statements to ensure that the ID token is being verified and that the user record is being successfully read or created.
+
+Example Outline for the Sync Endpoint
+Here’s a basic example of what your /api/sync-firebase-user route might look like:
+
+typescript
+Copy
+// In your server code (e.g., in a new file like firebase-sync.ts or within your routes.ts)
+import { Request, Response } from "express";
+import admin from "firebase-admin";
+import { db } from "@db";
+import { users } from "@db/schema";
+import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+
+export async function syncFirebaseUser(req: Request, res: Response) {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ error: "idToken is required" });
+    }
+
+    // Verify the Firebase ID token
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const firebaseUid = decodedToken.uid;
+    const email = decodedToken.email;
+
+    // Query your database for an existing user with this Firebase UID (or email)
+    const [existingUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.firebaseUid, firebaseUid))
+      .limit(1);
+
+    let userRecord;
+    if (existingUser) {
+      userRecord = existingUser;
+    } else {
+      // If the user doesn't exist, create a new one.
+      // Adjust the fields as necessary.
+      const newUser = await db.insert(users).values({
+        firebaseUid,
+        email,
+        username: email ? email.split("@")[0] : "newuser",
+        password: "", // For Firebase users, you can leave this blank.
+        // SSID will be auto-generated based on your schema default
+      }).returning();
+      userRecord = newUser[0];
+    }
+
+    return res.json(userRecord);
+  } catch (error: any) {
+    console.error("Error syncing Firebase user:", error.message || error);
+    return res.status(500).json({ error: "Failed to sync user data", message: error.message });
+  }
+}
+Then, in your routes registration (for example, in /server/routes.ts), add:
+
+typescript
+Copy
+import { syncFirebaseUser } from "./firebase-sync";
+
+// ...
+
+app.post("/api/sync-firebase-user", syncFirebaseUser);
+Next Steps
+Add and Test the Endpoint: Once you add the above endpoint to your server, try logging in again.
+Check Environment Variables: Make sure that your new Firebase service account JSON is correctly configured.
+Monitor Logs: Use your console logs to verify that the ID token is being verified and that the user is being synchronized correctly.
+Implementing this missing endpoint should resolve the “failed to sync user data” error during login.
+
+If you continue to see issues after adding the endpoint, please share any error messages from your server logs so we can further diagnose the problem.

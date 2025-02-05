@@ -179,7 +179,7 @@ export function setupAuth(app: Express) {
           message: verifyError.message,
           stack: verifyError.stack
         });
-        return res.status(401).json({ 
+        return res.status(401).json({
           error: "Token verification failed",
           details: verifyError.message,
           code: verifyError.code
@@ -273,14 +273,14 @@ export function setupAuth(app: Express) {
     try {
       // List first few users from Firebase Auth
       const listUsersResult = await admin.auth().listUsers(1);
-      res.json({ 
+      res.json({
         status: 'success',
         message: 'Firebase Admin SDK is working',
         userCount: listUsersResult.users.length
       });
     } catch (error) {
       console.error('Firebase Admin test failed:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         status: 'error',
         message: 'Firebase Admin SDK test failed',
         error: error instanceof Error ? error.message : 'Unknown error'
