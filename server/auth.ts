@@ -188,8 +188,13 @@ export function setupAuth(app: Express) {
     }
   });
 
-  // Sync endpoint with enhanced error handling
-  app.post("/api/sync-firebase-user", async (req, res) => {
+  // Move sync endpoint outside of other auth routes for better visibility and access
+  app.post("/api/sync-firebase-user", async (req: Request, res: Response) => {
+    console.log('Sync endpoint called with body:', {
+      hasIdToken: !!req.body?.idToken,
+      contentType: req.headers['content-type']
+    });
+
     try {
       const { idToken } = req.body;
 
@@ -224,20 +229,7 @@ export function setupAuth(app: Express) {
       const firebaseUid = decodedToken.uid;
       console.log('Looking up user with Firebase UID:', firebaseUid);
 
-      // Test Firebase Admin functionality
-      try {
-        const userRecord = await admin.auth().getUser(firebaseUid);
-        console.log('Firebase user record retrieved:', {
-          uid: userRecord.uid,
-          email: userRecord.email,
-          emailVerified: userRecord.emailVerified
-        });
-      } catch (userError) {
-        console.error('Failed to get Firebase user record:', userError);
-        // Continue anyway as this is just a test
-      }
-
-      // Check if user exists in our database
+      // Look up existing user
       let [user] = await db
         .select()
         .from(users)
@@ -287,19 +279,14 @@ export function setupAuth(app: Express) {
         apiKey: '***' // Mask API key in logs
       });
 
-      res.json(responseData);
+      return res.json(responseData);
     } catch (error) {
       console.error('Error in sync endpoint:', error);
       let errorMessage = 'Failed to sync user';
       if (error instanceof Error) {
         errorMessage = error.message;
-        if (error.message.includes('auth/id-token-expired')) {
-          errorMessage = 'Authentication session expired. Please sign in again.';
-        } else if (error.message.includes('auth/invalid-id-token')) {
-          errorMessage = 'Invalid authentication token. Please sign in again.';
-        }
       }
-      res.status(500).json({ error: errorMessage });
+      return res.status(500).json({ error: errorMessage });
     }
   });
 
@@ -385,6 +372,7 @@ export function setupAuth(app: Express) {
       createdAt: req.user.createdAt,
     });
   });
+  return app;
 }
 
 // Token verification middleware
