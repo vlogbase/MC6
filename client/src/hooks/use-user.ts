@@ -54,7 +54,8 @@ async function handleFirebaseError(error: any): Promise<string> {
 }
 
 async function syncUserWithDatabase(firebaseUser: FirebaseUser): Promise<AuthUser> {
-  const idToken = await getIdToken(firebaseUser);
+  console.log('Syncing user with database:', firebaseUser.email);
+  const idToken = await getIdToken(firebaseUser, true); // Force refresh token
   const response = await fetch('/api/sync-firebase-user', {
     method: 'POST',
     headers: {
@@ -64,10 +65,14 @@ async function syncUserWithDatabase(firebaseUser: FirebaseUser): Promise<AuthUse
   });
 
   if (!response.ok) {
-    throw new Error('Failed to sync user with database');
+    const errorText = await response.text();
+    console.error('Failed to sync user:', errorText);
+    throw new Error(`Failed to sync user: ${errorText}`);
   }
 
-  return response.json();
+  const userData = await response.json();
+  console.log('User synced successfully:', userData);
+  return userData;
 }
 
 export function useUser() {
@@ -86,18 +91,35 @@ export function useUser() {
           setIsLoading(true);
           if (firebaseUser) {
             console.log('User signed in:', firebaseUser.email);
-            const dbUser = await syncUserWithDatabase(firebaseUser);
-            setUser(dbUser);
+            try {
+              const dbUser = await syncUserWithDatabase(firebaseUser);
+              console.log('Setting user state:', dbUser);
+              setUser(dbUser);
+              toast({
+                title: "Success",
+                description: "Successfully signed in",
+              });
+            } catch (syncError) {
+              console.error('Error syncing user:', syncError);
+              // If sync fails, sign out the user to maintain consistent state
+              await auth.signOut();
+              setUser(null);
+              toast({
+                title: "Error",
+                description: "Failed to sync user data. Please try again.",
+                variant: "destructive",
+              });
+            }
           } else {
             console.log('User signed out');
             setUser(null);
           }
         } catch (error) {
-          console.error('Error syncing user:', error);
+          console.error('Auth state change error:', error);
           setError(error instanceof Error ? error : new Error('Failed to sync user'));
           toast({
             title: "Error",
-            description: "Failed to sync user data",
+            description: "Authentication error occurred",
             variant: "destructive",
           });
         } finally {
@@ -108,20 +130,43 @@ export function useUser() {
         console.error('Auth state change error:', error);
         setError(error as Error);
         setIsLoading(false);
+        toast({
+          title: "Error",
+          description: "Authentication state monitoring failed",
+          variant: "destructive",
+        });
       }
     );
 
-    // Cleanup subscription
     return () => unsubscribe();
   }, [toast]);
+
+  // Google Sign In
+  const googleSignIn = async (): Promise<RequestResult> => {
+    try {
+      console.log('Initiating Google sign-in');
+      const result = await signInWithPopup(auth, googleProvider);
+      console.log('Google sign-in successful:', result.user.email);
+      const dbUser = await syncUserWithDatabase(result.user);
+      console.log('User synced after Google sign-in:', dbUser);
+      return { ok: true, user: dbUser };
+    } catch (error: any) {
+      console.error('Google sign-in error:', error);
+      const errorMessage = await handleFirebaseError(error);
+      return { ok: false, message: errorMessage };
+    }
+  };
 
   // Email/Password Login
   const login = async ({ email, password }: { email: string; password: string }): Promise<RequestResult> => {
     try {
+      console.log('Attempting email/password login:', email);
       const result = await signInWithEmailAndPassword(auth, email, password);
       const dbUser = await syncUserWithDatabase(result.user);
+      console.log('Login successful:', dbUser);
       return { ok: true, user: dbUser };
     } catch (error: any) {
+      console.error('Login error:', error);
       const errorMessage = await handleFirebaseError(error);
       return { ok: false, message: errorMessage };
     }
@@ -130,22 +175,13 @@ export function useUser() {
   // Email/Password Registration
   const register = async ({ email, password }: { email: string; password: string }): Promise<RequestResult> => {
     try {
+      console.log('Attempting to register new user:', email);
       const result = await createUserWithEmailAndPassword(auth, email, password);
       const dbUser = await syncUserWithDatabase(result.user);
+      console.log('Registration successful:', dbUser);
       return { ok: true, user: dbUser };
     } catch (error: any) {
-      const errorMessage = await handleFirebaseError(error);
-      return { ok: false, message: errorMessage };
-    }
-  };
-
-  // Google Sign In
-  const googleSignIn = async (): Promise<RequestResult> => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const dbUser = await syncUserWithDatabase(result.user);
-      return { ok: true, user: dbUser };
-    } catch (error: any) {
+      console.error('Registration error:', error);
       const errorMessage = await handleFirebaseError(error);
       return { ok: false, message: errorMessage };
     }
@@ -155,8 +191,10 @@ export function useUser() {
   const logout = async (): Promise<RequestResult> => {
     try {
       await signOut(auth);
+      console.log('Logout successful');
       return { ok: true };
     } catch (error: any) {
+      console.error('Logout error:', error);
       const errorMessage = await handleFirebaseError(error);
       return { ok: false, message: errorMessage };
     }
