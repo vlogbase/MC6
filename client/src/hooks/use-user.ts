@@ -55,24 +55,38 @@ async function handleFirebaseError(error: any): Promise<string> {
 
 async function syncUserWithDatabase(firebaseUser: FirebaseUser): Promise<AuthUser> {
   console.log('Syncing user with database:', firebaseUser.email);
-  const idToken = await getIdToken(firebaseUser, true); // Force refresh token
-  const response = await fetch('/api/sync-firebase-user', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ idToken }),
-  });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('Failed to sync user:', errorText);
-    throw new Error(`Failed to sync user: ${errorText}`);
+  try {
+    const idToken = await getIdToken(firebaseUser, true);
+    console.log('Got fresh ID token, making sync request');
+
+    const response = await fetch('/api/sync-firebase-user', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ idToken }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Sync failed with status:', response.status, 'Error:', errorText);
+      throw new Error(`Failed to sync user: ${errorText}`);
+    }
+
+    const userData = await response.json();
+    console.log('User synced successfully with data:', userData);
+
+    if (!userData.ssid || !userData.id) {
+      console.error('Invalid user data received:', userData);
+      throw new Error('Received invalid user data from server');
+    }
+
+    return userData;
+  } catch (error) {
+    console.error('Sync error details:', error);
+    throw error;
   }
-
-  const userData = await response.json();
-  console.log('User synced successfully:', userData);
-  return userData;
 }
 
 export function useUser() {

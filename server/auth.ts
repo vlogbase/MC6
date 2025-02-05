@@ -156,11 +156,24 @@ export function setupAuth(app: Express) {
         return res.status(400).json({ error: "No ID token provided" });
       }
 
-      console.log('Attempting to verify Firebase ID token...');
-      // Verify the Firebase ID token
-      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      console.log('Starting Firebase token verification process');
+      let decodedToken;
+      try {
+        decodedToken = await admin.auth().verifyIdToken(idToken);
+        console.log('Token verified successfully:', {
+          uid: decodedToken.uid,
+          email: decodedToken.email
+        });
+      } catch (verifyError: any) {
+        console.error('Token verification failed:', verifyError.code, verifyError.message);
+        return res.status(401).json({ 
+          error: "Token verification failed",
+          details: verifyError.message
+        });
+      }
+
       const firebaseUid = decodedToken.uid;
-      console.log('Token verified for Firebase UID:', firebaseUid);
+      console.log('Looking up user with Firebase UID:', firebaseUid);
 
       // Check if user exists in our database
       let [user] = await db
@@ -171,19 +184,22 @@ export function setupAuth(app: Express) {
 
       if (!user) {
         console.log('Creating new user for Firebase UID:', firebaseUid);
-        // Create new user
-        [user] = await db
-          .insert(users)
-          .values({
-            username: decodedToken.email?.split('@')[0] || `user-${nanoid(6)}`,
-            email: decodedToken.email,
-            firebaseUid,
-            ssid: nanoid(12),
-            apiKey: nanoid(40),
-          })
-          .returning();
-
-        console.log('Created new user:', user.username);
+        try {
+          [user] = await db
+            .insert(users)
+            .values({
+              username: decodedToken.email?.split('@')[0] || `user-${nanoid(6)}`,
+              email: decodedToken.email,
+              firebaseUid,
+              ssid: nanoid(12),
+              apiKey: nanoid(40),
+            })
+            .returning();
+          console.log('Created new user successfully:', user.username);
+        } catch (dbError) {
+          console.error('Database insertion failed:', dbError);
+          throw new Error('Failed to create user record');
+        }
       } else {
         console.log('Found existing user:', user.username);
       }
@@ -195,10 +211,15 @@ export function setupAuth(app: Express) {
         ssid: user.ssid,
         apiKey: user.apiKey,
       };
-      console.log('Sending user data response:', responseData);
+
+      console.log('Sending user data response:', {
+        ...responseData,
+        apiKey: '***' // Mask API key in logs
+      });
+
       res.json(responseData);
     } catch (error) {
-      console.error('Error syncing Firebase user:', error);
+      console.error('Error in sync endpoint:', error);
       let errorMessage = 'Failed to sync user';
       if (error instanceof Error) {
         errorMessage = error.message;
