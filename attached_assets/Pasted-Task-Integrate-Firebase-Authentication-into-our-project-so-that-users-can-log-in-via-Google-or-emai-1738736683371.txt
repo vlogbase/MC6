@@ -1,0 +1,88 @@
+Task:
+Integrate Firebase Authentication into our project so that users can log in via Google or email/password. Use the modular Firebase JavaScript SDK (installed via npm) as described in the Firebase documentation.
+
+Client-side Requirements:
+
+Install Firebase:
+
+Run:
+nginx
+Copy
+npm install firebase
+Initialize Firebase:
+
+Create (or update) a file (for example, firebase.ts or firebase.js) in the client source directory that imports the necessary functions from the SDK. Use the following template, but replace the hard-coded values with environment variables:
+js
+Copy
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+import { getAuth, GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+
+// Firebase configuration object (values taken from environment variables)
+const firebaseConfig = {
+  apiKey: process.env.FIREBASE_API_KEY,
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.FIREBASE_APP_ID,
+  measurementId: process.env.FIREBASE_MEASUREMENT_ID, // optional for SDK v7.20.0 and later
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const auth = getAuth(app);
+
+export { app, analytics, auth, GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword };
+Update the Authentication UI:
+
+Modify the existing login/register components to include:
+A button for Google sign‑in that calls signInWithPopup(auth, new GoogleAuthProvider()).
+Forms that use createUserWithEmailAndPassword and signInWithEmailAndPassword for email/password authentication.
+Server-side Requirements:
+
+Install Firebase Admin SDK:
+
+Run:
+nginx
+Copy
+npm install firebase-admin
+Initialize Firebase Admin:
+
+In your server code (for example, in an auth middleware or a separate file), initialize Firebase Admin using a service account. The service account JSON should be stored as an environment secret (e.g. FIREBASE_SERVICE_ACCOUNT_JSON). Use code similar to:
+js
+Copy
+import admin from "firebase-admin";
+
+// Initialize Firebase Admin using a service account JSON from an environment variable
+admin.initializeApp({
+  credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))
+});
+Authentication Middleware:
+
+Create (or update) middleware that extracts the Firebase ID token from the Authorization header (in Bearer token format).
+Verify the token using admin.auth().verifyIdToken(token), and populate req.user with the decoded token information.
+Environment and Firebase Console Setup:
+
+In the Firebase Console, go to Project Settings → General and locate your web app’s Firebase configuration. Add the following values as Replit secrets:
+FIREBASE_API_KEY
+FIREBASE_AUTH_DOMAIN
+FIREBASE_PROJECT_ID
+FIREBASE_STORAGE_BUCKET
+FIREBASE_MESSAGING_SENDER_ID
+FIREBASE_APP_ID
+FIREBASE_MEASUREMENT_ID (if applicable)
+Under Project Settings → Service Accounts, generate a new private key and store its JSON content as the FIREBASE_SERVICE_ACCOUNT_JSON secret in Replit.
+In the Firebase Console under Authentication → Sign-in method, enable both Google and Email/Password providers.
+Additional Requirements:
+
+All Firebase configuration and credentials must be read from environment variables to ensure security.
+Include detailed inline comments in the code explaining the purpose of each Firebase import, initialization step, and authentication method.
+Update protected endpoints on the server to validate that requests include a valid Firebase ID token.
+Outcome:
+
+Users can now authenticate using Google or email/password on the client.
+The server validates Firebase ID tokens to protect API endpoints.
+Please implement this integration across the client and server parts of our codebase.
