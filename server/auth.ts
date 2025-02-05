@@ -152,12 +152,15 @@ export function setupAuth(app: Express) {
       const { idToken } = req.body;
 
       if (!idToken) {
+        console.error('No ID token provided in sync request');
         return res.status(400).json({ error: "No ID token provided" });
       }
 
+      console.log('Attempting to verify Firebase ID token...');
       // Verify the Firebase ID token
       const decodedToken = await admin.auth().verifyIdToken(idToken);
       const firebaseUid = decodedToken.uid;
+      console.log('Token verified for Firebase UID:', firebaseUid);
 
       // Check if user exists in our database
       let [user] = await db
@@ -167,6 +170,7 @@ export function setupAuth(app: Express) {
         .limit(1);
 
       if (!user) {
+        console.log('Creating new user for Firebase UID:', firebaseUid);
         // Create new user
         [user] = await db
           .insert(users)
@@ -180,18 +184,31 @@ export function setupAuth(app: Express) {
           .returning();
 
         console.log('Created new user:', user.username);
+      } else {
+        console.log('Found existing user:', user.username);
       }
 
-      res.json({
+      const responseData = {
         id: user.id,
         username: user.username,
         email: user.email,
         ssid: user.ssid,
         apiKey: user.apiKey,
-      });
+      };
+      console.log('Sending user data response:', responseData);
+      res.json(responseData);
     } catch (error) {
       console.error('Error syncing Firebase user:', error);
-      res.status(500).json({ error: "Failed to sync user" });
+      let errorMessage = 'Failed to sync user';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        if (error.message.includes('auth/id-token-expired')) {
+          errorMessage = 'Authentication session expired. Please sign in again.';
+        } else if (error.message.includes('auth/invalid-id-token')) {
+          errorMessage = 'Invalid authentication token. Please sign in again.';
+        }
+      }
+      res.status(500).json({ error: errorMessage });
     }
   });
 
