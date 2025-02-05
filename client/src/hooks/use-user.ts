@@ -159,6 +159,13 @@ export function useUser() {
   const googleSignIn = async (): Promise<RequestResult> => {
     try {
       console.log('Initiating Google sign-in');
+      console.log('Using Firebase config:', {
+        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+        authDomain: `${import.meta.env.VITE_FIREBASE_PROJECT_ID}.firebaseapp.com`,
+        hasApiKey: !!import.meta.env.VITE_FIREBASE_API_KEY,
+        hasAppId: !!import.meta.env.VITE_FIREBASE_APP_ID
+      });
+
       const result = await signInWithPopup(auth, googleProvider);
       console.log('Google sign-in successful:', result.user.email);
       const dbUser = await syncUserWithDatabase(result.user);
