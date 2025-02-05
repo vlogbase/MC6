@@ -1,0 +1,142 @@
+The error you now see is:
+
+css
+Copy
+Google Sign-in failed
+Failed to sync user: {"error":"Console request failed: endpoint is disabled"}
+This message indicates that after the Google sign‐in flow the application is trying to call an endpoint (typically your backend “sync user” endpoint or a related OAuth endpoint) that is “disabled” or not reachable. This can be caused by one or more of the following:
+
+An OAuth endpoint in your Google Cloud/Firebase settings isn’t enabled (for example, the OAuth client for Google Sign-in hasn’t been configured properly).
+Your backend sync endpoint isn’t deployed or accessible. Sometimes if the endpoint isn’t registered (or is being blocked by Replit’s configuration) you may see a “disabled” error.
+A caching or propagation delay. (Even though you redeployed, sometimes settings still need time to propagate.)
+Recommended Troubleshooting Steps
+1. Verify the Sync Endpoint Implementation and Deployment
+Ensure the endpoint exists and is active:
+Confirm that your /api/sync-firebase-user (or whichever endpoint you use to sync a Firebase user into your database) is defined in your routes and that it is not accidentally being skipped by middleware or filtered out. For example, your code should include something like:
+
+ts
+Copy
+// server/firebase-sync.ts
+import { Request, Response } from "express";
+import admin from "firebase-admin";
+import { db } from "@db";
+import { users } from "@db/schema";
+import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+
+export async function syncFirebaseUser(req: Request, res: Response) {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ error: "idToken is required" });
+    }
+    // Verify the Firebase token
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const firebaseUid = decodedToken.uid;
+    const email = decodedToken.email;
+    
+    // Query for an existing user using firebaseUid
+    const [existingUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.firebaseUid, firebaseUid))
+      .limit(1);
+
+    let userRecord;
+    if (existingUser) {
+      userRecord = existingUser;
+    } else {
+      // Create a new user (SSID is auto-generated per your schema)
+      const newUser = await db.insert(users).values({
+        firebaseUid,
+        email,
+        username: email ? email.split("@")[0] : "newuser",
+        password: "", // not needed for Firebase users
+      }).returning();
+      userRecord = newUser[0];
+    }
+    return res.json(userRecord);
+  } catch (error: any) {
+    console.error("Error syncing Firebase user:", error.message || error);
+    return res.status(500).json({
+      error: "Failed to sync user data",
+      message: error.message,
+    });
+  }
+}
+Register the endpoint:
+In your server’s routes file (e.g. server/routes.ts), ensure you have:
+
+ts
+Copy
+import { syncFirebaseUser } from "./firebase-sync";
+// ...
+app.post("/api/sync-firebase-user", syncFirebaseUser);
+Test directly:
+Use a tool like Postman or cURL to POST to your endpoint (using a valid Firebase ID token) to ensure it is working as expected. For example:
+
+bash
+Copy
+curl -X POST https://your-app.replit.app/api/sync-firebase-user \
+  -H "Content-Type: application/json" \
+  -d '{"idToken": "<your_valid_id_token>"}'
+If this endpoint itself is returning the “endpoint is disabled” error, then the issue is on the backend side (or with Replit’s routing).
+
+2. Double-Check Firebase Admin and OAuth Configuration
+Firebase Admin SDK:
+Ensure your server is correctly initializing the Firebase Admin SDK. Your code should load the service account JSON from your environment variables:
+
+ts
+Copy
+import admin from "firebase-admin";
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '{}');
+if (!serviceAccount || !serviceAccount.private_key) {
+  throw new Error("Missing or invalid Firebase Service Account JSON");
+}
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+Google Sign-in in Firebase:
+In your Firebase Console under Authentication > Sign-in method, double-check that the Google provider is enabled.
+
+OAuth Redirects:
+In the Google Cloud Console (APIs & Services > Credentials), open your OAuth client and verify that the Authorized Redirect URIs include the proper paths:
+
+https://mc-5-andy105.replit.app/__auth/handler
+(And any additional URLs required by your setup, such as https://monetizechatbots-c9935.firebaseapp.com/__auth/handler if applicable.)
+Remove any empty URI fields if present.
+
+3. Check Replit and Deployment Settings
+Redeploy/Restart:
+Even if no code changed, redeploy or restart your Replit app to ensure that all environment variables (including your updated OAuth settings and Firebase service account) are loaded.
+
+Replit Endpoint Access:
+The error “Console request failed: endpoint is disabled” may also indicate that Replit’s internal configuration is preventing access to a particular endpoint. Ask the Replit agent:
+
+“I’m receiving an error 'Console request failed: endpoint is disabled' when trying to sign in with Google. My Firebase OAuth settings are updated and my /api/sync-firebase-user endpoint is implemented. Could you please verify if there is any Replit configuration (or firewall setting) that might be disabling access to this endpoint?”
+
+Clear Cache:
+Clear your browser cache (or try an incognito window) to rule out caching issues.
+
+4. Review Logs and Network Traffic
+Server Logs:
+Look at your server’s logs (or add additional console.log statements) inside your sync endpoint. For instance, log the decoded Firebase token, the query result from your database, and any error messages.
+
+Browser Network Tab:
+Open your browser’s developer tools (F12 or Ctrl+Shift+I) and check the Network tab. When you attempt to sign in, review the request to your backend. Confirm the full response (status code and body) for clues.
+
+What to Tell the Replit Agent
+When reaching out to Replit support, you might say something like:
+
+**“I am receiving the following error upon Google sign-in:
+
+Google Sign-in failed Failed to sync user: {"error":"Console request failed: endpoint is disabled"}
+
+I have confirmed that:
+
+The Google Sign-in provider is enabled in Firebase Authentication.
+My OAuth client in Google Cloud Console includes the correct Authorized Redirect URIs (including /__auth/handler).
+My backend endpoint /api/sync-firebase-user is implemented and deployed.
+I have redeployed my app and cleared browser caches.
+Could you please verify if there is any internal configuration or firewall rule on Replit that might be disabling my API endpoint(s) or if there is a caching layer that might be serving an outdated configuration? Additionally, are there any known issues with the “console request” for authentication endpoints in the current Replit environment?”**
+
