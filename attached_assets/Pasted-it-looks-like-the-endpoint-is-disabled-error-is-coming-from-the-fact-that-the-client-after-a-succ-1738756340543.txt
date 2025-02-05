@@ -1,0 +1,77 @@
+it looks like the “endpoint is disabled” error is coming from the fact that the client (after a successful Google sign‑in) is trying to call an endpoint to sync the Firebase‐authenticated user with your database—but that endpoint isn’t currently implemented or registered in your server code.
+
+To fix this, you need to add (or re‑enable) the sync endpoint (often called something like “/api/sync-firebase-user”) so that when the client sends a request with the Firebase ID token, your server can verify the token and then create or retrieve the corresponding user record.
+
+Here’s what you can do:
+
+Create the sync endpoint code.
+In your server (for example, create a new file such as firebase-sync.ts or add it into your routes file), add a function similar to this:
+
+typescript
+Copy
+// server/firebase-sync.ts
+import { Request, Response } from "express";
+import admin from "firebase-admin";
+import { db } from "@db";
+import { users } from "@db/schema";
+import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+
+export async function syncFirebaseUser(req: Request, res: Response) {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ error: "idToken is required" });
+    }
+    // Verify the Firebase ID token using the Admin SDK
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const firebaseUid = decodedToken.uid;
+    const email = decodedToken.email;
+
+    // Look for an existing user by firebaseUid
+    const [existingUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.firebaseUid, firebaseUid))
+      .limit(1);
+
+    let userRecord;
+    if (existingUser) {
+      userRecord = existingUser;
+    } else {
+      // Create a new user record if none exists
+      const newUser = await db
+        .insert(users)
+        .values({
+          firebaseUid,
+          email,
+          username: email ? email.split("@")[0] : "newuser",
+          password: "", // not needed for Firebase users
+          ssid: nanoid(12),
+        })
+        .returning();
+      userRecord = newUser[0];
+    }
+    return res.json(userRecord);
+  } catch (error: any) {
+    console.error("Error syncing Firebase user:", error.message || error);
+    return res.status(500).json({
+      error: "Failed to sync user data",
+      message: error.message,
+    });
+  }
+}
+Register the endpoint.
+In your main routes registration (for example, in your /server/routes.ts file), import the sync function and register it. For example, add near the other /api endpoints:
+
+typescript
+Copy
+// server/routes.ts (add near your other API routes)
+import { syncFirebaseUser } from "./firebase-sync";
+// ...
+app.post("/api/sync-firebase-user", syncFirebaseUser);
+Update your client (if needed).
+Ensure that after a successful Google sign‑in the client code calls /api/sync-firebase-user (passing the Firebase ID token) so that the user data is synchronized with your database.
+
+Redeploy your server.
+Once you add and register this endpoint, restart or redeploy your project. This should remove the “endpoint is disabled” error because the sync endpoint will now be active and available.
