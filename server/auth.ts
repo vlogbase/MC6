@@ -48,7 +48,7 @@ declare global {
   }
 }
 
-// Initialize Firebase Admin
+// Initialize Firebase Admin with enhanced error handling
 const b64Secret = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_B64;
 if (!b64Secret) {
   throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON_B64 environment variable is required');
@@ -58,28 +58,63 @@ if (!b64Secret) {
 try {
   // Decode the base64-encoded service account JSON
   const serviceAccountJson = Buffer.from(b64Secret, 'base64').toString('utf8');
-  if (!serviceAccountJson) {
-    throw new Error("Failed to decode Firebase service account JSON from base64");
+
+  // Validate the decoded JSON string
+  if (!serviceAccountJson || serviceAccountJson.trim() === '') {
+    throw new Error("Empty or invalid base64 decoded content");
   }
 
+  console.log('Attempting to parse service account JSON...');
+
+  // Parse and validate the service account configuration
   const serviceAccount = JSON.parse(serviceAccountJson);
-  if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
-    throw new Error("Invalid Firebase service account configuration");
+
+  // Validate required fields
+  const requiredFields = ['project_id', 'private_key', 'client_email'];
+  const missingFields = requiredFields.filter(field => !serviceAccount[field]);
+
+  if (missingFields.length > 0) {
+    throw new Error(`Missing required fields in service account: ${missingFields.join(', ')}`);
   }
 
-  // Log initialization attempt (without sensitive data)
-  console.log('Attempting Firebase Admin initialization with:', {
+  // Validate private key format
+  if (!serviceAccount.private_key.includes('-----BEGIN PRIVATE KEY-----')) {
+    throw new Error('Invalid private key format');
+  }
+
+  // Log initialization details (without sensitive data)
+  console.log('Service account validation successful:', {
     project_id: serviceAccount.project_id,
     client_email: serviceAccount.client_email,
-    private_key_provided: !!serviceAccount.private_key
+    private_key_length: serviceAccount.private_key?.length,
+    has_valid_key_format: serviceAccount.private_key?.includes('-----BEGIN PRIVATE KEY-----')
   });
 
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+  // Initialize Firebase Admin SDK
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log('Firebase Admin SDK initialized successfully');
+  } else {
+    console.log('Firebase Admin SDK already initialized');
+  }
+
+} catch (error: any) {
+  console.error('Firebase Admin initialization error:', {
+    name: error.name,
+    message: error.message,
+    stack: error.stack
   });
-  console.log('Firebase Admin initialized successfully with project:', serviceAccount.project_id);
-} catch (error) {
-  console.error('Failed to initialize Firebase Admin:', error);
+
+  if (error instanceof SyntaxError) {
+    console.error('Failed to parse service account JSON. Check base64 encoding.');
+  } else if (error.message.includes('invalid_grant')) {
+    console.error('Invalid credentials. The service account key may have been revoked or is malformed.');
+  } else if (error.message.includes('private_key')) {
+    console.error('Private key validation failed. Check the key format.');
+  }
+
   throw error;
 }
 
