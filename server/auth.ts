@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import rateLimit from "express-rate-limit";
 import { nanoid } from 'nanoid';
 import jwt from 'jsonwebtoken';
+import admin from 'firebase-admin';
 
 const scryptAsync = promisify(scrypt);
 
@@ -30,6 +31,7 @@ const crypto = {
     return `${buf.toString("hex")}.${salt}`;
   },
   compare: async (suppliedPassword: string, storedPassword: string) => {
+    if (!storedPassword) return false;
     const [hashedPassword, salt] = storedPassword.split(".");
     const hashedPasswordBuf = Buffer.from(hashedPassword, "hex");
     const suppliedPasswordBuf = (await scryptAsync(suppliedPassword, salt, 64)) as Buffer;
@@ -46,61 +48,26 @@ declare global {
   }
 }
 
-// Token generation functions
-function generateAccessToken(user: Express.User) {
-  const payload = {
-    id: user.id,
-    username: user.username,
-    ssid: user.ssid,
-    type: 'access'
-  };
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRY });
+// Initialize Firebase Admin
+if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+  throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON environment variable is required');
 }
 
-function generateRefreshToken(user: Express.User) {
-  const payload = {
-    id: user.id,
-    type: 'refresh'
-  };
-  return jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRY });
-}
-
-// Token verification middleware
-export function verifyToken(req: Request, res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return next(); // Continue to session-based auth if no token
+// Initialize Firebase Admin using a service account
+try {
+  // Retrieve the full service account JSON from the secret
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!serviceAccountJson) {
+    throw new Error("Missing Firebase Service Account JSON");
   }
+  const serviceAccount = JSON.parse(serviceAccountJson);
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
-    req.user = {
-      id: decoded.id,
-      username: decoded.username,
-      ssid: decoded.ssid
-    } as Express.User;
-    req.token = token;
-    next();
-  } catch (err) {
-    if (err instanceof jwt.TokenExpiredError) {
-      return res.status(401).json({ error: "Token expired" });
-    }
-    next(); // Continue to session-based auth if token is invalid
-  }
-}
-
-/**
- * authenticateRequest
- * Middleware to ensure user is logged in for dashboard access
- * Supports both JWT and session-based authentication
- */
-export function authenticateRequest(req: Request, res: Response, next: NextFunction) {
-  if (req.user) {
-    return next();
-  }
-  return res.status(401).json({ error: "Authentication required" });
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+} catch (error) {
+  console.error('Failed to initialize Firebase Admin:', error);
+  throw error;
 }
 
 export function setupAuth(app: Express) {
@@ -146,6 +113,9 @@ export function setupAuth(app: Express) {
         if (!user) {
           return done(null, false, { message: "Incorrect username." } as IVerifyOptions);
         }
+        if (!user.password) {
+          return done(null, false, { message: "No password set for this account." } as IVerifyOptions);
+        }
         const isMatch = await crypto.compare(password, user.password);
         if (!isMatch) {
           return done(null, false, { message: "Incorrect password." } as IVerifyOptions);
@@ -170,92 +140,52 @@ export function setupAuth(app: Express) {
     }
   });
 
-  // Token refresh endpoint
-  app.post("/api/refresh-token", async (req, res) => {
-    const refreshToken = req.body.refreshToken;
-
-    if (!refreshToken) {
-      return res.status(400).json({ error: "Refresh token required" });
-    }
-
+  // New endpoint to sync Firebase user with our database
+  app.post("/api/sync-firebase-user", async (req, res) => {
     try {
-      const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as any;
-      if (decoded.type !== 'refresh') {
-        return res.status(400).json({ error: "Invalid token type" });
+      const { idToken } = req.body;
+
+      if (!idToken) {
+        return res.status(400).json({ error: "No ID token provided" });
       }
 
-      const [user] = await db.select().from(users).where(eq(users.id, decoded.id)).limit(1);
-      if (!user) {
-        return res.status(404).json({ error: "User not found" });
-      }
+      // Verify the Firebase ID token
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const firebaseUid = decodedToken.uid;
 
-      const accessToken = generateAccessToken(user);
-      const newRefreshToken = generateRefreshToken(user);
-
-      res.json({
-        accessToken,
-        refreshToken: newRefreshToken,
-      });
-    } catch (err) {
-      if (err instanceof jwt.TokenExpiredError) {
-        return res.status(401).json({ error: "Refresh token expired" });
-      }
-      return res.status(400).json({ error: "Invalid refresh token" });
-    }
-  });
-
-  app.post("/api/register", async (req, res, next) => {
-    try {
-      const result = insertUserSchema.safeParse(req.body);
-      if (!result.success) {
-        return res.status(400).send(
-          "Invalid input: " + result.error.issues.map((i) => i.message).join(", ")
-        );
-      }
-
-      const { username, password } = result.data;
-      // Check if user exists
-      const [existing] = await db
+      // Check if user exists in our database
+      let [user] = await db
         .select()
         .from(users)
-        .where(eq(users.username, username))
+        .where(eq(users.firebaseUid, firebaseUid))
         .limit(1);
-      if (existing) {
-        return res.status(400).send("Username already exists");
+
+      if (!user) {
+        // Create new user
+        [user] = await db
+          .insert(users)
+          .values({
+            username: decodedToken.email?.split('@')[0] || `user-${nanoid(6)}`,
+            email: decodedToken.email,
+            firebaseUid,
+            ssid: nanoid(12),
+            apiKey: nanoid(40),
+          })
+          .returning();
+
+        console.log('Created new user:', user.username);
       }
 
-      // Create user with API key and SSID
-      const hashedPassword = await crypto.hash(password);
-      const [newUser] = await db
-        .insert(users)
-        .values({
-          username,
-          password: hashedPassword,
-          ssid: nanoid(12),
-          apiKey: nanoid(40),
-        })
-        .returning();
-
-      const accessToken = generateAccessToken(newUser);
-      const refreshToken = generateRefreshToken(newUser);
-
-      req.login(newUser, (err) => {
-        if (err) return next(err);
-        res.json({
-          message: "Registration successful",
-          user: {
-            id: newUser.id,
-            username: newUser.username,
-            ssid: newUser.ssid,
-            apiKey: newUser.apiKey,
-            createdAt: newUser.createdAt,
-          },
-          accessToken,
-          refreshToken,
-        });
+      res.json({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        ssid: user.ssid,
+        apiKey: user.apiKey,
       });
     } catch (error) {
-      next(error);
+      console.error('Error syncing Firebase user:', error);
+      res.status(500).json({ error: "Failed to sync user" });
     }
   });
 
@@ -275,9 +205,6 @@ export function setupAuth(app: Express) {
           return next(err);
         }
 
-        const accessToken = generateAccessToken(user);
-        const refreshToken = generateRefreshToken(user);
-
         console.log("Login successful for user:", user.username);
         return res.json({
           message: "Login successful",
@@ -287,9 +214,7 @@ export function setupAuth(app: Express) {
             ssid: user.ssid,
             apiKey: user.apiKey,
             createdAt: user.createdAt,
-          },
-          accessToken,
-          refreshToken,
+          }
         });
       });
     })(req, res, next);
@@ -315,34 +240,53 @@ export function setupAuth(app: Express) {
   });
 
   app.get("/api/user", authenticateRequest, (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
     return res.json({
-      id: req.user!.id,
-      username: req.user!.username,
-      ssid: req.user!.ssid,
-      createdAt: req.user!.createdAt,
+      id: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      ssid: req.user.ssid,
+      createdAt: req.user.createdAt,
     });
   });
+}
 
-  // API key regeneration endpoint
-  app.post("/api/regenerate-api-key", authenticateRequest, async (req, res) => {
-    try {
-      if (!req.user?.id) {
-        return res.status(401).json({ error: "Authentication required" });
-      }
+// Token verification middleware
+export function verifyToken(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.split(' ')[1];
 
-      const [updatedUser] = await db
-        .update(users)
-        .set({ apiKey: nanoid(40) })
-        .where(eq(users.id, req.user.id))
-        .returning();
+  if (!token) {
+    return next(); // Continue to session-based auth if no token
+  }
 
-      res.json({
-        message: "API key regenerated successfully",
-        apiKey: updatedUser.apiKey,
-      });
-    } catch (error) {
-      console.error("Error regenerating API key:", error);
-      res.status(500).json({ error: "Failed to regenerate API key" });
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    req.user = {
+      id: decoded.id,
+      username: decoded.username,
+      ssid: decoded.ssid
+    } as Express.User;
+    req.token = token;
+    next();
+  } catch (err) {
+    if (err instanceof jwt.TokenExpiredError) {
+      return res.status(401).json({ error: "Token expired" });
     }
-  });
+    next(); // Continue to session-based auth if token is invalid
+  }
+}
+
+/**
+ * authenticateRequest
+ * Middleware to ensure user is logged in for dashboard access
+ * Supports both JWT and session-based authentication
+ */
+export function authenticateRequest(req: Request, res: Response, next: NextFunction) {
+  if (req.user) {
+    return next();
+  }
+  return res.status(401).json({ error: "Authentication required" });
 }

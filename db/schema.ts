@@ -1,11 +1,14 @@
 import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+import { z } from "zod";
 import { nanoid } from 'nanoid';
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
-  username: text("username").unique().notNull(),
-  password: text("password").notNull(),
+  username: text("username").notNull(),
+  email: text("email"),
+  password: text("password"),
+  firebaseUid: text("firebase_uid").unique(),
   ssid: text("ssid").unique().notNull().$defaultFn(() => nanoid(12)),
   apiKey: text("api_key").unique(), 
   createdAt: timestamp("created_at").defaultNow(),
@@ -21,8 +24,18 @@ export const links = pgTable("links", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertUserSchema = createInsertSchema(users);
-export const selectUserSchema = createSelectSchema(users);
+// Create base schemas
+const baseInsertUser = createInsertSchema(users);
+const baseSelectUser = createSelectSchema(users);
+
+// Extend with custom validation
+export const insertUserSchema = baseInsertUser.extend({
+  username: z.string().min(1, "Username is required"),
+  email: z.string().email("Invalid email").optional(),
+  password: z.string().min(6, "Password must be at least 6 characters").optional(),
+});
+
+export const selectUserSchema = baseSelectUser;
 export const insertLinkSchema = createInsertSchema(links);
 export const selectLinkSchema = createSelectSchema(links);
 

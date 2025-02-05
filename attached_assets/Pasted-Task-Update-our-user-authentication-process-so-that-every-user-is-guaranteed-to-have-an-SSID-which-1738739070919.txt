@@ -1,0 +1,37 @@
+Task:
+Update our user authentication process so that every user is guaranteed to have an SSID (which will be displayed as “Your User ID”) as soon as they log in for the first time.
+
+Requirements:
+
+On Login:
+When a user logs in (either via email/password or via Google), query the database for their record.
+Check whether the user record has an SSID assigned. (The ssid field should never be empty.)
+Generate & Update SSID:
+If the user record does not have an SSID (or if it is missing/empty because the user originally signed up before we enforced this rule), generate a new SSID using nanoid(12) and update the user's record in the database.
+Once assigned, the SSID must be permanent – any subsequent logins should retrieve the existing SSID.
+UI Display:
+In the user dashboard or profile page, display the SSID as “Your User ID: <ssid>.”
+Hints:
+
+In your database schema (in /db/schema.ts), the users table already defines the ssid column with a default function. However, for existing users (or if the default wasn’t applied during registration), you’ll need to detect the missing value on login.
+In the backend authentication code (likely in /server/auth.ts or /server/routes.ts), after successfully identifying the user (for example, after Google sign‑in), add logic similar to:
+ts
+Copy
+import { nanoid } from 'nanoid';
+import { db } from '@db';
+import { users } from '@db/schema';
+import { eq } from 'drizzle-orm';
+
+// After fetching the user record (e.g., based on email or API key)
+if (!user.ssid) {
+  // Generate a new SSID and update the user record
+  const newSsid = nanoid(12);
+  await db.update(users).set({ ssid: newSsid }).where(eq(users.id, user.id));
+  user.ssid = newSsid;
+}
+Ensure that the front end (for instance, in useUser or where user details are shown) displays this SSID as “Your User ID.”
+Outcome:
+When a user logs in:
+
+If they already have an SSID, it’s retrieved and displayed.
+If they do not have an SSID (e.g., an old account that never received one), one is generated, stored in the database, and then displayed as “Your User ID.”
