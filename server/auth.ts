@@ -67,6 +67,13 @@ try {
     throw new Error("Invalid Firebase service account configuration");
   }
 
+  // Log initialization attempt (without sensitive data)
+  console.log('Attempting Firebase Admin initialization with:', {
+    project_id: serviceAccount.project_id,
+    client_email: serviceAccount.client_email,
+    private_key_provided: !!serviceAccount.private_key
+  });
+
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
@@ -146,7 +153,7 @@ export function setupAuth(app: Express) {
     }
   });
 
-  // New endpoint to sync Firebase user with our database
+  // Sync endpoint with enhanced error handling
   app.post("/api/sync-firebase-user", async (req, res) => {
     try {
       const { idToken } = req.body;
@@ -162,18 +169,38 @@ export function setupAuth(app: Express) {
         decodedToken = await admin.auth().verifyIdToken(idToken);
         console.log('Token verified successfully:', {
           uid: decodedToken.uid,
-          email: decodedToken.email
+          email: decodedToken.email,
+          token_issued_at: new Date(decodedToken.iat * 1000).toISOString(),
+          token_expires_at: new Date(decodedToken.exp * 1000).toISOString()
         });
       } catch (verifyError: any) {
-        console.error('Token verification failed:', verifyError.code, verifyError.message);
+        console.error('Token verification failed:', {
+          code: verifyError.code,
+          message: verifyError.message,
+          stack: verifyError.stack
+        });
         return res.status(401).json({ 
           error: "Token verification failed",
-          details: verifyError.message
+          details: verifyError.message,
+          code: verifyError.code
         });
       }
 
       const firebaseUid = decodedToken.uid;
       console.log('Looking up user with Firebase UID:', firebaseUid);
+
+      // Test Firebase Admin functionality
+      try {
+        const userRecord = await admin.auth().getUser(firebaseUid);
+        console.log('Firebase user record retrieved:', {
+          uid: userRecord.uid,
+          email: userRecord.email,
+          emailVerified: userRecord.emailVerified
+        });
+      } catch (userError) {
+        console.error('Failed to get Firebase user record:', userError);
+        // Continue anyway as this is just a test
+      }
 
       // Check if user exists in our database
       let [user] = await db
@@ -195,13 +222,21 @@ export function setupAuth(app: Express) {
               apiKey: nanoid(40),
             })
             .returning();
-          console.log('Created new user successfully:', user.username);
+          console.log('Created new user successfully:', {
+            id: user.id,
+            username: user.username,
+            email: user.email
+          });
         } catch (dbError) {
           console.error('Database insertion failed:', dbError);
           throw new Error('Failed to create user record');
         }
       } else {
-        console.log('Found existing user:', user.username);
+        console.log('Found existing user:', {
+          id: user.id,
+          username: user.username,
+          email: user.email
+        });
       }
 
       const responseData = {
@@ -230,6 +265,26 @@ export function setupAuth(app: Express) {
         }
       }
       res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // Add a test endpoint to verify Firebase Admin SDK
+  app.get("/api/test-firebase-admin", async (req, res) => {
+    try {
+      // List first few users from Firebase Auth
+      const listUsersResult = await admin.auth().listUsers(1);
+      res.json({ 
+        status: 'success',
+        message: 'Firebase Admin SDK is working',
+        userCount: listUsersResult.users.length
+      });
+    } catch (error) {
+      console.error('Firebase Admin test failed:', error);
+      res.status(500).json({ 
+        status: 'error',
+        message: 'Firebase Admin SDK test failed',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
