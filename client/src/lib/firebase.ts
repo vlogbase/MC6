@@ -27,7 +27,9 @@ const googleProvider = new GoogleAuthProvider();
 
 // Configure additional provider settings if needed
 googleProvider.setCustomParameters({
-  prompt: 'select_account' // Forces account selection even when one account is available
+  prompt: 'select_account', // Forces account selection even when one account is available
+  // Add host domain for additional security
+  hd: new URL(window.location.href).hostname
 });
 
 export { auth, googleProvider };

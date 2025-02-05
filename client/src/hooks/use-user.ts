@@ -36,7 +36,7 @@ async function handleFirebaseError(error: any): Promise<string> {
     case 'auth/invalid-email':
       return 'Invalid email address';
     case 'auth/operation-not-allowed':
-      return 'Operation not allowed';
+      return 'Operation not allowed - Please ensure Google Sign-in is enabled in Firebase Console';
     case 'auth/weak-password':
       return 'Password is too weak';
     case 'auth/user-disabled':
@@ -47,7 +47,15 @@ async function handleFirebaseError(error: any): Promise<string> {
     case 'auth/popup-closed-by-user':
       return 'Sign in was cancelled';
     case 'auth/unauthorized-domain':
-      return 'This domain is not authorized for Google sign-in. Please contact the administrator.';
+      return `This domain ${window.location.hostname} is not authorized for Google sign-in. Please add it to Firebase Console's Authorized Domains.`;
+    case 'auth/internal-error':
+      return 'An internal authentication error occurred. Please try again.';
+    case 'auth/network-request-failed':
+      return 'Network error occurred. Please check your connection and try again.';
+    case 'auth/timeout':
+      return 'The authentication request timed out. Please try again.';
+    case 'auth/web-storage-unsupported':
+      return 'Web storage is not supported or is disabled. Please enable cookies.';
     default:
       return error.message || 'An unexpected error occurred';
   }
@@ -163,11 +171,18 @@ export function useUser() {
         projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
         authDomain: `${import.meta.env.VITE_FIREBASE_PROJECT_ID}.firebaseapp.com`,
         hasApiKey: !!import.meta.env.VITE_FIREBASE_API_KEY,
-        hasAppId: !!import.meta.env.VITE_FIREBASE_APP_ID
+        hasAppId: !!import.meta.env.VITE_FIREBASE_APP_ID,
+        currentHostname: window.location.hostname
       });
 
       const result = await signInWithPopup(auth, googleProvider);
       console.log('Google sign-in successful:', result.user.email);
+
+      // Get the ID token before syncing
+      console.log('Getting ID token for user sync...');
+      const idToken = await result.user.getIdToken();
+      console.log('ID token obtained, length:', idToken.length);
+
       const dbUser = await syncUserWithDatabase(result.user);
       console.log('User synced after Google sign-in:', dbUser);
       return { ok: true, user: dbUser };
