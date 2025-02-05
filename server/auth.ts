@@ -49,22 +49,28 @@ declare global {
 }
 
 // Initialize Firebase Admin
-if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-  throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON environment variable is required');
+const b64Secret = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_B64;
+if (!b64Secret) {
+  throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON_B64 environment variable is required');
 }
 
-// Initialize Firebase Admin using a service account
+// Initialize Firebase Admin using base64-encoded service account
 try {
-  // Retrieve the full service account JSON from the secret
-  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  // Decode the base64-encoded service account JSON
+  const serviceAccountJson = Buffer.from(b64Secret, 'base64').toString('utf8');
   if (!serviceAccountJson) {
-    throw new Error("Missing Firebase Service Account JSON");
+    throw new Error("Failed to decode Firebase service account JSON from base64");
   }
+
   const serviceAccount = JSON.parse(serviceAccountJson);
+  if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
+    throw new Error("Invalid Firebase service account configuration");
+  }
 
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
+  console.log('Firebase Admin initialized successfully with project:', serviceAccount.project_id);
 } catch (error) {
   console.error('Failed to initialize Firebase Admin:', error);
   throw error;
